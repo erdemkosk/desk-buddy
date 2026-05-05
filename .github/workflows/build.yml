@@ -1,0 +1,62 @@
+name: Build Deskbuddy Firmware
+
+on:
+  push:
+    branches:
+      - main # Ana dala (main) her kod eklendiginde / merge edildiginde calisir
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v1.1.2
+
+      - name: Install ESP32 Core
+        run: |
+          arduino-cli core update-index --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core install esp32:esp32 --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+
+      - name: Install Libraries
+        run: |
+          arduino-cli lib install "ArduinoJson"
+          arduino-cli lib install "TFT_eSPI"
+          arduino-cli lib install "XPT2046_Touchscreen"
+
+      - name: Configure TFT_eSPI
+        run: |
+          if [ -f "User_Setup.h" ]; then
+            cp User_Setup.h ~/Arduino/libraries/TFT_eSPI/User_Setup.h
+            echo "Kisisel User_Setup.h kopyalandi."
+          fi
+
+      - name: Compile Sketch
+        run: |
+          mkdir -p build
+          mkdir -p Deskbuddy
+          # Tüm dosyalari Deskbuddy klasorune tasi (build ve gizli dosyalar haric)
+          find . -maxdepth 1 -type f -exec cp {} Deskbuddy/ \;
+          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs Deskbuddy/Deskbuddy.ino --output-dir build
+
+      - name: Extract Version
+        id: extract_version
+        run: |
+          # Deskbuddy_config.h icerisindeki FIRMWARE_VERSION degerini bul
+          VERSION=$(grep -oE 'FIRMWARE_VERSION = "([^"]+)"' Deskbuddy_config.h | cut -d'"' -f2)
+          if [ -z "$VERSION" ]; then VERSION="latest"; fi
+          echo "Bulunan versiyon: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Deskbuddy ${{ env.VERSION }}
+          files: build/Deskbuddy.ino.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
