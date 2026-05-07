@@ -1467,13 +1467,15 @@ void drawTopBar(const String& title) {
   tft.fillRect(0, 0, SCREEN_W, TOPBAR_H, COL_PANEL_ALT);
   tft.drawFastHLine(0, TOPBAR_H - 1, SCREEN_W, COL_STROKE);
 
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
-  tft.drawString(title, 10, 9, 2);
+  const int topBarMidY = TOPBAR_H / 2;
 
-  tft.setTextDatum(TR_DATUM);
-  tft.setTextColor(COL_DIM, COL_PANEL_ALT);
-  tft.drawString(FIRMWARE_VERSION, topBarVersionRightX(), 11, 1);
+  tft.setTextDatum(ML_DATUM);
+  tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+  tft.drawString(title, 10, topBarMidY, 2);
+
+  tft.setTextDatum(MR_DATUM);
+  tft.setTextColor(COL_ACCENT, COL_PANEL_ALT);
+  tft.drawString(FIRMWARE_VERSION, topBarVersionRightX(), topBarMidY, 1);
   tft.setTextDatum(TL_DATUM);
 
   const int bs = TOPBAR_BTN_SZ;
