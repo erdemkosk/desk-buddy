@@ -188,7 +188,8 @@ String calendarUrl = "";
 String nextEventTitle = "--";
 String nextEventTime = "--";
 time_t lastCalendarFetch = 0;
-const uint32_t CALENDAR_INTERVAL_SEC = 15 * 60;
+const uint32_t CALENDAR_INTERVAL_SEC = 3 * 60;
+SemaphoreHandle_t calendarMutex = NULL;
 
 String spotifyUrl = "";
 String spotifySong = "";
@@ -1676,78 +1677,12 @@ static bool fetchCalendarData() {
       DynamicJsonDocument doc(512);
       if (!deserializeJson(doc, body)) {
         if (doc.containsKey("title") && doc.containsKey("time")) {
-          nextEventTitle = doc["title"].as<String>();
-          nextEventTime = doc["time"].as<String>();
-          got = true;
-        }
-      }
-    }
-    http.end();
-  }
-
-  if (got || calendarUrl.length() >= 10) {
-    lastCalendarFetch = time(nullptr);
-    lastSyncTime = lastCalendarFetch;
-  }
-  return got;
-}
-
-void ensureCalendar() {
-  if (WiFi.status() != WL_CONNECTED)
-    return;
-  time_t nowT = time(nullptr);
-  bool stale = (lastCalendarFetch == 0) ||
-               ((nowT - lastCalendarFetch) > (time_t)CALENDAR_INTERVAL_SEC);
-  if (!stale && nextEventTime != "--")
-    return;
-  if (fetchCalendarData())
-    dataDirty = true;
-}
-
-static void cleanTr(String &s) {
-  s.replace("ş", "s");
-  s.replace("Ş", "S");
-  s.replace("ı", "i");
-  s.replace("İ", "I");
-  s.replace("ğ", "g");
-  s.replace("Ğ", "G");
-  s.replace("ü", "u");
-  s.replace("Ü", "U");
-  s.replace("ö", "o");
-  s.replace("Ö", "O");
-  s.replace("ç", "c");
-  s.replace("Ç", "C");
-}
-
-static bool fetchSpotifyData() {
-  if (WiFi.status() != WL_CONNECTED || spotifyUrl.length() < 10)
-    return false;
-
-  WiFiClientSecure client;
-  client.setInsecure();
-  HTTPClient http;
-  http.setTimeout(15000);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-
-  bool got = false;
-  if (http.begin(client, spotifyUrl)) {
-    if (http.GET() == 200) {
-      String body = http.getString();
-      DynamicJsonDocument doc(512);
-      if (!deserializeJson(doc, body)) {
-        if (doc.containsKey("song")) {
-          String sSong = doc["song"].as<String>();
-          String sArtist = doc["artist"].as<String>();
-          cleanTr(sSong);
-          cleanTr(sArtist);
-          bool sPlaying = doc["playing"].as<bool>();
-
-          if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
-            spotifySong = sSong;
-            spotifyArtist = sArtist;
-            spotifyPlaying = sPlaying;
-            lastSpotifyFetch = time(nullptr);
-            xSemaphoreGive(spotifyMutex);
+          String cTitle = doc["title"].as<String>();
+          String cTime = doc["time"].as<String>();
+          if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
+            nextEventTitle = cTitle;
+            nextEventTime = cTime;
+            xSemaphoreGive(calendarMutex);
           }
           got = true;
           dataDirty = true;
@@ -1757,27 +1692,43 @@ static bool fetchSpotifyData() {
     http.end();
   }
 
-  if (got || spotifyUrl.length() >= 10) {
-    if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
-      lastSpotifyFetch = time(nullptr);
-      lastSyncTime = lastSpotifyFetch;
-      xSemaphoreGive(spotifyMutex);
+  if (got || calendarUrl.length() >= 10) {
+    if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
+      lastCalendarFetch = time(nullptr);
+      lastSyncTime = lastCalendarFetch;
+      xSemaphoreGive(calendarMutex);
     }
   }
   return got;
 }
 
-void spotifyFetchTask(void *pvParameters) {
+void networkFetchTask(void *pvParameters) {
   while (true) {
-    if (WiFi.status() == WL_CONNECTED && spotifyUrl.length() >= 10) {
+    if (WiFi.status() == WL_CONNECTED) {
       time_t nowT = time(nullptr);
-      time_t lastF = 0;
-      if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
-        lastF = lastSpotifyFetch;
-        xSemaphoreGive(spotifyMutex);
+
+      // Spotify Data
+      if (spotifyUrl.length() >= 10) {
+        time_t lastS = 0;
+        if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
+          lastS = lastSpotifyFetch;
+          xSemaphoreGive(spotifyMutex);
+        }
+        if (lastS == 0 || (nowT - lastS) > SPOTIFY_INTERVAL_SEC) {
+          fetchSpotifyData();
+        }
       }
-      if (lastF == 0 || (nowT - lastF) > SPOTIFY_INTERVAL_SEC) {
-        fetchSpotifyData();
+
+      // Calendar Data
+      if (calendarUrl.length() >= 10) {
+        time_t lastC = 0;
+        if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
+          lastC = lastCalendarFetch;
+          xSemaphoreGive(calendarMutex);
+        }
+        if (lastC == 0 || (nowT - lastC) > CALENDAR_INTERVAL_SEC) {
+          fetchCalendarData();
+        }
       }
     }
     vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -2807,8 +2758,15 @@ void drawNotesHomeWidget(int x, int y, int w, int h, String &cache,
 
 void drawCalendarHomeWidget(int x, int y, int w, int h, String &cache,
                             bool force = false) {
-  drawWeatherStyleMetricSprite(x, y, w, h, "Takvim", nextEventTime, cache,
-                               force, nextEventTitle);
+  String localTime = "--:--";
+  String localTitle = "Bekleniyor...";
+  if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
+    localTime = nextEventTime;
+    localTitle = nextEventTitle;
+    xSemaphoreGive(calendarMutex);
+  }
+  drawWeatherStyleMetricSprite(x, y, w, h, "Takvim", localTime, cache, force,
+                               localTitle);
 }
 
 void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
@@ -3636,11 +3594,11 @@ void setup() {
   ensureWeather();
   ensureKpIndex();
   ensureFinance();
-  ensureCalendar();
 
   spotifyMutex = xSemaphoreCreateMutex();
-  if (spotifyMutex) {
-    xTaskCreatePinnedToCore(spotifyFetchTask, "SpotifyTask", 6144, NULL, 1,
+  calendarMutex = xSemaphoreCreateMutex();
+  if (spotifyMutex || calendarMutex) {
+    xTaskCreatePinnedToCore(networkFetchTask, "NetworkTask", 6144, NULL, 1,
                             NULL, 0);
   }
 
@@ -3663,7 +3621,13 @@ void setup() {
 static bool wasMeetingFlashing = false;
 
 void updateMeetingFlashState() {
-  if (sleepOff || nextEventTime == "--" || nextEventTime.length() < 4) {
+  String localTime = "--";
+  if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
+    localTime = nextEventTime;
+    xSemaphoreGive(calendarMutex);
+  }
+
+  if (sleepOff || localTime == "--" || localTime.length() < 4) {
     if (wasMeetingFlashing) {
       wasMeetingFlashing = false;
       setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
@@ -3672,7 +3636,7 @@ void updateMeetingFlashState() {
   }
 
   int eh, em;
-  if (sscanf(nextEventTime.c_str(), "%d:%d", &eh, &em) == 2) {
+  if (sscanf(localTime.c_str(), "%d:%d", &eh, &em) == 2) {
     time_t nowT = time(nullptr);
     struct tm tmNow;
     localtime_r(&nowT, &tmNow);
