@@ -161,7 +161,7 @@ static int topBarDimBtnX() { return topBarMoonBtnX() - TOPBAR_BTN_SZ - TOPBAR_BT
 static int topBarWifiForgetBtnX() { return topBarDimBtnX() - TOPBAR_BTN_SZ - TOPBAR_BTN_GAP; }
 
 /** Firmware semver; baslik yaninda gosterilir (drawTopBar). */
-static const char* FIRMWARE_VERSION = "v1.1.0";
+static const char* FIRMWARE_VERSION = "v1.2.0";
 
 const int HOME_GRID_Y1 = 120;
 const int HOME_GRID_Y2 = 198;
@@ -3002,12 +3002,12 @@ void runWifiProvisioningIfNeeded() {
   tft.setTextColor(COL_TEXT, COL_BG);
   tft.drawString("Wi-Fi kurulum", 10, 4, 2);
   tft.setTextColor(COL_ACCENT, COL_BG);
-  tft.drawString("QR -> ag katilimi", 10, 24, 1);
+  tft.drawString("QR -> ag katilimi", 10, 22, 1);
   tft.setTextColor(COL_DIM, COL_BG);
-  tft.drawString(WIFI_AP_SSID, 10, 38, 1);
+  tft.drawString(WIFI_AP_SSID, 10, 34, 1);
 
-  int nextY = drawProvisionWifiJoinQr(50);
-  if (nextY < 200) nextY = 200;
+  int nextY = drawProvisionWifiJoinQr(82);
+  if (nextY + 50 > SCREEN_H) nextY = SCREEN_H - 52;
   tft.setTextColor(COL_DIM, COL_BG);
   tft.drawString("Tarayici:", 10, nextY, 1);
   tft.setTextColor(COL_TEXT, COL_BG);
