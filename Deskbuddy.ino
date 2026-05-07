@@ -195,6 +195,7 @@ String spotifySong = "";
 String spotifyArtist = "";
 bool spotifyPlaying = false;
 time_t lastSpotifyFetch = 0;
+const uint32_t SPOTIFY_INTERVAL_SEC = 15;
 
 const char *homeWidgetKey(HomeWidgetType type) {
   switch (type) {
