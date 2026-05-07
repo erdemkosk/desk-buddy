@@ -1592,7 +1592,7 @@ void drawTopBar(const String& title) {
   tft.drawString(title, tx0, topBarMidY, 2);
   const int suffixX = tx0 + tft.textWidth(title, 2);
 
-  tft.setTextColor(COL_DIM, COL_PANEL_ALT);
+  tft.setTextColor(COL_ACCENT, COL_PANEL_ALT);
   tft.drawString(String(" - ") + FIRMWARE_VERSION, suffixX, topBarMidY, 1);
   tft.setTextDatum(TL_DATUM);
 
