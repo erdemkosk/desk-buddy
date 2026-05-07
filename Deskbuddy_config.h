@@ -9,7 +9,7 @@
 #endif
 
 /** Kurulum soft-AP SSID (QR + WiFi.softAP). */
-inline constexpr const char* DESKBUDDY_SOFTAP_SSID = "Deskbuddy-Setup";
+inline constexpr const char *DESKBUDDY_SOFTAP_SSID = "Deskbuddy-Setup";
 
 /** Firmware semver; drawTopBar + web */
-inline constexpr const char* FIRMWARE_VERSION = "v1.2.1";
+inline constexpr const char *FIRMWARE_VERSION = "v1.2.2";
