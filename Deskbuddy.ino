@@ -9,6 +9,8 @@
 // - Wind direction uses Accent color
 // - Weather sun event field automatically shows Sunrise or Sunset, whichever is next
 // - Uptime added to Status page
+// - Wi-Fi: NVS keys wifiSsid / wifiPass; empty first boot opens AP Deskbuddy-Setup and http://192.168.4.1/
+// - Ust bar wifi unut: NVS sil, onay (Evet/Hayir) sonra kurulum AP
 
 // Arduino: otomatik fonksiyon prototipleri son #include'dan sonra eklenir;
 // parametre tipleri (HomeWidgetType, WxKind) include'lardan once tanimlanir.
@@ -42,6 +44,7 @@ enum WxKind {
 };
 
 #include <WiFi.h>
+#include <DNSServer.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <TFT_eSPI.h>
@@ -56,8 +59,18 @@ enum WxKind {
 // =========================================================
 // WIFI
 // =========================================================
-const char* WIFI_SSID = "MEK";       // Replace with your WiFi network name
-const char* WIFI_PASS = "35Hb9992!!";   // Replace with your WiFi password
+// NVS anahtarlari: wifiSsid, wifiPass (kurulum portalindan yazilir).
+// Ilk kullanimda bos ise "Deskbuddy-Setup" AP + tarayici 192.168.4.1
+//
+// Isteg bagli tek seferlik tasma (bir kez NVS'e yazilir, sonra bu satirlari bos birakin):
+#ifndef DESKBUDDY_WIFI_FALLBACK_SSID
+#define DESKBUDDY_WIFI_FALLBACK_SSID ""
+#endif
+#ifndef DESKBUDDY_WIFI_FALLBACK_PASS
+#define DESKBUDDY_WIFI_FALLBACK_PASS ""
+#endif
+
+static const char* WIFI_AP_SSID = "Deskbuddy-Setup";
 
 // =========================================================
 // DISPLAY / TOUCH
@@ -90,6 +103,7 @@ static const bool TOUCH_FLIP_Y  = false;
 // WEB / STORAGE
 // =========================================================
 WebServer server(80);
+DNSServer dnsServer;
 Preferences prefs;
 
 // =========================================================
@@ -135,19 +149,17 @@ const int SCREEN_H = 320;
 const int TOPBAR_H = 34;
 const int NAV_H    = 44;
 
-/** Ust bar sag: daralt (sol) + tam uyku / ay (sag). */
+/** Ust bar sag: wifi unut (sol), daralt, tam uyku / ay (sag). */
 const int TOPBAR_BTN_SZ = 23;
 const int TOPBAR_BTN_GAP = 11;
 const int TOPBAR_BTN_MR = 5;
 
 static int topBarMoonBtnX() { return SCREEN_W - TOPBAR_BTN_SZ - TOPBAR_BTN_MR; }
 static int topBarDimBtnX() { return topBarMoonBtnX() - TOPBAR_BTN_SZ - TOPBAR_BTN_GAP; }
+static int topBarWifiForgetBtnX() { return topBarDimBtnX() - TOPBAR_BTN_SZ - TOPBAR_BTN_GAP; }
 
-/** Firmware semver; ust bardaki uyku/onleme tuslarinin solunda gosterilir. */
+/** Firmware semver; baslik yaninda gosterilir (drawTopBar). */
 static const char* FIRMWARE_VERSION = "v1.0.0";
-
-/** Saga hizali surum yazisinin sag kenari ile parlaklik butonu solu: iki ara bosluk (TOPBAR_BTN_GAP x2). */
-static int topBarVersionRightX() { return topBarDimBtnX() - 2 * TOPBAR_BTN_GAP; }
 
 const int HOME_GRID_Y1 = 120;
 const int HOME_GRID_Y2 = 198;
@@ -165,6 +177,11 @@ const int TIMER_DONE_X = 26;
 const int TIMER_DONE_Y = 92;
 const int TIMER_DONE_W = 188;
 const int TIMER_DONE_H = 108;
+/** Wi-Fi agini unut onay kutusu */
+const int WIFI_FORGET_DLG_X = 16;
+const int WIFI_FORGET_DLG_Y = 88;
+const int WIFI_FORGET_DLG_W = 208;
+const int WIFI_FORGET_DLG_H = 144;
 const int PAGE_ROW1_Y = 42;
 const int PAGE_ROW2_Y = 120;
 const int PAGE_ROW3_Y = 198;
@@ -236,6 +253,7 @@ String cacheTimerMenu = "";
 String cacheTimerDone = "";
 String cacheTimerDoneCountdown = "";
 String cacheTimerDoneFlash = "";
+String cacheWifiForgetDlg = "";
 
 String lastWifiText = "";
 String lastSignalText = "";
@@ -360,6 +378,8 @@ unsigned long focusDurationSec = 0;
 unsigned long focusRemainingSec = 0;
 bool timerDoneDialogOpen = false;
 unsigned long timerDoneDialogStartedMs = 0;
+/** Wi-Fi NVS kaydini silmeden once onay kutusu */
+bool wifiForgetConfirmOpen = false;
 const unsigned long TIMER_DONE_DIALOG_MS = 60UL * 1000UL;
 bool flashModeEnabled = false;
 int timerPresetMin[6] = {1, 5, 10, 15, 25, 30};
@@ -962,7 +982,7 @@ void enterManualSleepFull() {
 
 
 void handleAutoSleep() {
-  if (focusMenuOpen || timerDoneDialogOpen) return;
+  if (focusMenuOpen || timerDoneDialogOpen || wifiForgetConfirmOpen) return;
   if (sleepIntervalMin <= 0) return;
 
   unsigned long now = millis();
@@ -1070,6 +1090,11 @@ void loadStoredSettings() {
   regionFormatKey  = prefs.getString("region", "europe");
   flashModeEnabled = prefs.getBool("flashMode", false);
   wifiEnabled      = prefs.getBool("wifiEnabled", true);
+
+  if (prefs.getString("wifiSsid", "").length() == 0 && strlen(DESKBUDDY_WIFI_FALLBACK_SSID) > 0) {
+    prefs.putString("wifiSsid", String(DESKBUDDY_WIFI_FALLBACK_SSID));
+    prefs.putString("wifiPass", String(DESKBUDDY_WIFI_FALLBACK_PASS));
+  }
 
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     String key = String("homeSlot") + String(i);
@@ -1463,6 +1488,98 @@ static void drawTopBarMoonSleepIcon(TFT_eSPI& g, int cx, int cy, uint16_t moonCo
   g.fillCircle(cx + 4, cy - 2, 7, maskBg);
 }
 
+/** Kucuk "wifi sil / unut" isareti */
+static void drawTopBarWifiForgetIcon(TFT_eSPI& g, int cx, int cy, uint16_t fg) {
+  g.drawFastHLine(cx - 7, cy - 4, 5, fg);
+  g.drawFastHLine(cx - 5, cy - 1, 9, fg);
+  g.drawFastHLine(cx - 7, cy + 2, 14, fg);
+  g.drawLine(cx + 3, cy - 6, cx + 7, cy + 6, fg);
+}
+
+static void performWifiForgetAndRestart() {
+  prefs.remove("wifiSsid");
+  prefs.remove("wifiPass");
+  prefs.putBool("wifiEnabled", true);
+  WiFi.disconnect(true, true);
+  WiFi.mode(WIFI_OFF);
+  delay(180);
+  ESP.restart();
+}
+
+static void dismissWifiForgetConfirm() {
+  wifiForgetConfirmOpen = false;
+  cacheWifiForgetDlg = "";
+  pageDirty = true;
+}
+
+void openWifiForgetConfirm() {
+  focusMenuOpen = false;
+  cacheTimerMenu = "";
+  wifiForgetConfirmOpen = true;
+  pageDirty = true;
+}
+
+void drawWifiForgetConfirmOverlay(bool force = false) {
+  if (!wifiForgetConfirmOpen) return;
+
+  const String combined = String((int)COL_PANEL_ALT) + "|" + String((int)COL_ACCENT) + "|" + String((int)COL_TEXT);
+  if (!force && combined == cacheWifiForgetDlg) return;
+  cacheWifiForgetDlg = combined;
+
+  tft.fillScreen(COL_BG);
+  tft.fillRoundRect(WIFI_FORGET_DLG_X, WIFI_FORGET_DLG_Y, WIFI_FORGET_DLG_W, WIFI_FORGET_DLG_H, 12, COL_PANEL_ALT);
+  tft.drawRoundRect(WIFI_FORGET_DLG_X, WIFI_FORGET_DLG_Y, WIFI_FORGET_DLG_W, WIFI_FORGET_DLG_H, 12, COL_ACCENT);
+
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+  tft.drawString("Emin misin?", WIFI_FORGET_DLG_X + WIFI_FORGET_DLG_W / 2, WIFI_FORGET_DLG_Y + 28, 2);
+  tft.setTextColor(COL_DIM, COL_PANEL_ALT);
+  tft.drawString("Kayitli ag silinir.", WIFI_FORGET_DLG_X + WIFI_FORGET_DLG_W / 2, WIFI_FORGET_DLG_Y + 54, 2);
+  tft.drawString("Deskbuddy-Setup ile", WIFI_FORGET_DLG_X + WIFI_FORGET_DLG_W / 2, WIFI_FORGET_DLG_Y + 74, 1);
+  tft.drawString("yeniden kurarsin.", WIFI_FORGET_DLG_X + WIFI_FORGET_DLG_W / 2, WIFI_FORGET_DLG_Y + 88, 1);
+
+  const int by = WIFI_FORGET_DLG_Y + WIFI_FORGET_DLG_H - 40;
+  const int bw = 78;
+  const int bx0 = WIFI_FORGET_DLG_X + 18;
+  const int bx1 = WIFI_FORGET_DLG_X + WIFI_FORGET_DLG_W - 18 - bw;
+
+  tft.fillRoundRect(bx0, by, bw, 28, 8, COL_RED);
+  tft.drawRoundRect(bx0, by, bw, 28, 8, COL_RED);
+  tft.setTextColor(TFT_WHITE, COL_RED);
+  tft.drawString("Evet", bx0 + bw / 2, by + 15, 2);
+
+  tft.fillRoundRect(bx1, by, bw, 28, 8, COL_PANEL);
+  tft.drawRoundRect(bx1, by, bw, 28, 8, COL_STROKE);
+  tft.setTextColor(COL_TEXT, COL_PANEL);
+  tft.drawString("Hayir", bx1 + bw / 2, by + 15, 2);
+  tft.setTextDatum(TL_DATUM);
+}
+
+bool handleWifiForgetConfirmTouch(int x, int y) {
+  if (!wifiForgetConfirmOpen) return false;
+
+  const int dx = WIFI_FORGET_DLG_X;
+  const int dy = WIFI_FORGET_DLG_Y;
+  const int dw = WIFI_FORGET_DLG_W;
+  const int dh = WIFI_FORGET_DLG_H;
+  const int by = dy + dh - 40;
+  const int bw = 78;
+  const int bx0 = dx + 18;
+  const int bx1 = dx + dw - 18 - bw;
+
+  if (x >= bx0 && x < bx0 + bw && y >= by && y < by + 28) {
+    performWifiForgetAndRestart();
+    return true;
+  }
+  if (x >= bx1 && x < bx1 + bw && y >= by && y < by + 28) {
+    dismissWifiForgetConfirm();
+    return true;
+  }
+
+  dismissWifiForgetConfirm();
+  return true;
+}
+
 void drawTopBar(const String& title) {
   tft.fillRect(0, 0, SCREEN_W, TOPBAR_H, COL_PANEL_ALT);
   tft.drawFastHLine(0, TOPBAR_H - 1, SCREEN_W, COL_STROKE);
@@ -1471,17 +1588,25 @@ void drawTopBar(const String& title) {
 
   tft.setTextDatum(ML_DATUM);
   tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
-  tft.drawString(title, 10, topBarMidY, 2);
+  const int tx0 = 10;
+  tft.drawString(title, tx0, topBarMidY, 2);
+  const int suffixX = tx0 + tft.textWidth(title, 2);
 
-  tft.setTextDatum(MR_DATUM);
-  tft.setTextColor(COL_ACCENT, COL_PANEL_ALT);
-  tft.drawString(FIRMWARE_VERSION, topBarVersionRightX(), topBarMidY, 1);
+  tft.setTextColor(COL_DIM, COL_PANEL_ALT);
+  tft.drawString(String(" - ") + FIRMWARE_VERSION, suffixX, topBarMidY, 1);
   tft.setTextDatum(TL_DATUM);
 
   const int bs = TOPBAR_BTN_SZ;
   const int by = (TOPBAR_H - bs) / 2;
+  const int bxWifi = topBarWifiForgetBtnX();
   const int bxDim = topBarDimBtnX();
   const int bxMoon = topBarMoonBtnX();
+
+  uint16_t bgWF = COL_PANEL;
+  uint16_t fgWF = COL_TEXT;
+  tft.fillRoundRect(bxWifi, by, bs, bs, 7, bgWF);
+  tft.drawRoundRect(bxWifi, by, bs, bs, 7, COL_ACCENT);
+  drawTopBarWifiForgetIcon(tft, bxWifi + bs / 2, by + bs / 2, fgWF);
 
   bool dimSel = manualDimMode && sleepDimmed && !sleepOff;
   bool moonSel = sleepOff;
@@ -2604,9 +2729,15 @@ void drawCurrentPageFull() {
 
   if (focusMenuOpen && currentPage == PAGE_HOME) drawFocusMenuOverlay(true);
   if (timerDoneDialogOpen) drawTimerDoneOverlay(true);
+  if (wifiForgetConfirmOpen) drawWifiForgetConfirmOverlay(true);
 }
 
 void updateCurrentPageDynamic() {
+  if (wifiForgetConfirmOpen) {
+    drawWifiForgetConfirmOverlay(false);
+    return;
+  }
+
   if (timerDoneDialogOpen) {
     drawTimerDoneOverlay(false);
     return;
@@ -2735,6 +2866,97 @@ void handleNavTouch(int x, int y) {
   if (newPage != currentPage) {
     currentPage = newPage;
     pageDirty = true;
+  }
+}
+
+// =========================================================
+// WIFI PROVISIONING (captive portal, NVS: wifiSsid / wifiPass)
+// =========================================================
+static void handleProvisionCaptiveRedirect() {
+  server.sendHeader("Location", "http://192.168.4.1/");
+  server.send(302, "text/plain", "");
+}
+
+static void handleProvisionRoot() {
+  String h;
+  h.reserve(1800);
+  h += "<!doctype html><html><head><meta charset='utf-8'>";
+  h += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+  h += "<title>Deskbuddy Wi-Fi</title>";
+  h += "<style>body{margin:0;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;padding:24px;}";
+  h += "h1{font-size:22px;margin:0 0 8px;}p{color:#94a3b8;font-size:14px;line-height:1.45;margin:0 0 16px;}";
+  h += "label{display:block;font-size:13px;margin:12px 0 6px;color:#cbd5e1;font-weight:600;}";
+  h += "input{width:100%;max-width:360px;padding:12px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#f1f5f9;box-sizing:border-box;font:inherit;}";
+  h += "button{margin-top:18px;background:#38bdf8;border:none;color:#0c1220;padding:12px 20px;border-radius:10px;font-weight:800;cursor:pointer;font:inherit;}</style></head><body>";
+  h += "<h1>Wi-Fi kurulumu</h1>";
+  h += "<p>Ev aginizin adini ve sifresini girin. Kaydettikten sonra cihaz yeniden baslar ve bu aga baglanir.</p>";
+  h += "<form method='POST' action='/savewifi'>";
+  h += "<label>Ag adi (SSID)</label><input name='ssid' maxlength='32' required autocomplete='off'>";
+  h += "<label>Sifre (acik ag ise bos)</label><input name='pass' maxlength='64' type='password' autocomplete='new-password'>";
+  h += "<button type='submit'>Kaydet ve yeniden baslat</button></form></body></html>";
+  server.send(200, "text/html; charset=utf-8", h);
+}
+
+static void handleProvisionSave() {
+  if (!server.hasArg("ssid")) {
+    server.send(400, "text/plain", "ssid gerekli");
+    return;
+  }
+  String ssid = server.arg("ssid");
+  String pass = server.hasArg("pass") ? server.arg("pass") : "";
+  ssid.trim();
+  pass.trim();
+  if (ssid.length() == 0) {
+    server.send(400, "text/plain", "SSID bos olamaz");
+    return;
+  }
+  prefs.putString("wifiSsid", ssid);
+  prefs.putString("wifiPass", pass);
+  server.send(200, "text/html; charset=utf-8",
+               "<!doctype html><meta charset='utf-8'><p style='font-family:sans-serif'>Kaydedildi. Yeniden basliyor...</p>");
+  delay(400);
+  ESP.restart();
+}
+
+/** Bos NVS + WiFi acik: AP acar, DNS yonlendirir, / formu. Sonunda ESP.restart. */
+void runWifiProvisioningIfNeeded() {
+  if (!wifiEnabled) return;
+  if (prefs.getString("wifiSsid", "").length() > 0) return;
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(WIFI_AP_SSID);
+  IPAddress apIP(192, 168, 4, 1);
+  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+
+  dnsServer.start(53, "*", apIP);
+
+  server.on("/", HTTP_GET, handleProvisionRoot);
+  server.on("/savewifi", HTTP_POST, handleProvisionSave);
+  server.on("/generate_204", HTTP_GET, handleProvisionCaptiveRedirect);
+  server.on("/hotspot-detect.html", HTTP_GET, handleProvisionCaptiveRedirect);
+  server.on("/canonical.html", HTTP_GET, handleProvisionCaptiveRedirect);
+  server.onNotFound([]() { handleProvisionCaptiveRedirect(); });
+  server.begin();
+
+  tft.fillScreen(COL_BG);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(COL_TEXT, COL_BG);
+  tft.drawString("Wi-Fi kurulum", 10, 36, 2);
+  tft.setTextColor(COL_ACCENT, COL_BG);
+  tft.drawString("Ag: Deskbuddy-Setup", 10, 68, 2);
+  tft.setTextColor(COL_DIM, COL_BG);
+  tft.drawString("Telefonda bu aga", 10, 100, 2);
+  tft.drawString("baglanin.", 10, 120, 2);
+  tft.drawString("Tarayici:", 10, 152, 2);
+  tft.setTextColor(COL_TEXT, COL_BG);
+  tft.drawString("192.168.4.1", 10, 174, 2);
+  tft.setTextColor(COL_DIM, COL_BG);
+  tft.drawString("Kayit -> otomatik reset", 10, 206, 1);
+
+  for (;;) {
+    dnsServer.processNextRequest();
+    server.handleClient();
+    delay(4);
   }
 }
 
@@ -3131,9 +3353,16 @@ void beginWiFiConnect() {
     return;
   }
 
+  String ws = prefs.getString("wifiSsid", "");
+  String wp = prefs.getString("wifiPass", "");
+  if (ws.length() == 0) {
+    wifiConnectInProgress = false;
+    return;
+  }
+
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  WiFi.begin(ws.c_str(), wp.c_str());
   wifiConnectInProgress = true;
   wifiConnectStartedMs = millis();
 }
@@ -3179,6 +3408,14 @@ void setWifiEnabled(bool enabled) {
     WiFi.disconnect(true, true);
     WiFi.mode(WIFI_OFF);
   } else {
+    if (prefs.getString("wifiSsid", "").length() == 0) {
+      wifiConnectInProgress = false;
+      WiFi.disconnect(true, true);
+      WiFi.mode(WIFI_OFF);
+      delay(120);
+      ESP.restart();
+      return;
+    }
     beginWiFiConnect();
   }
 
@@ -3214,6 +3451,8 @@ void setup() {
   digitalWrite(TOUCH_CS, HIGH);
   ts.begin(touchSPI);
   ts.setRotation(ROT);
+
+  runWifiProvisioningIfNeeded();
 
   tft.drawString("Wi-Fi baglan...", 10, 34, 2);
   connectWiFi(true);
@@ -3268,17 +3507,25 @@ void loop() {
       return;
     }
 
+    if (handleWifiForgetConfirmTouch(tx, ty)) {
+      return;
+    }
+
     if (handleTimerDoneDialogTouch(tx, ty)) {
       return;
     }
 
+    const int bxWifi = topBarWifiForgetBtnX();
     const int bxDim = topBarDimBtnX();
     const int bxMoon = topBarMoonBtnX();
-    if (ty <= TOPBAR_H && tx >= bxDim && tx < SCREEN_W - TOPBAR_BTN_MR) {
-      if (tx >= bxMoon)
+    const int bs = TOPBAR_BTN_SZ;
+    if (ty <= TOPBAR_H && ty >= 0) {
+      if (tx >= bxMoon && tx < bxMoon + bs)
         enterManualSleepFull();
-      else
+      else if (tx >= bxDim && tx < bxDim + bs)
         toggleManualDimBar();
+      else if (tx >= bxWifi && tx < bxWifi + bs)
+        openWifiForgetConfirm();
     } else {
       if (sleepDimmed) {
         if (!manualDimMode) {
@@ -3317,7 +3564,7 @@ void loop() {
     dataDirty = false;
   }
 
-  if (currentPage == PAGE_HOME && !focusMenuOpen && !timerDoneDialogOpen && !sleepOff) {
+  if (currentPage == PAGE_HOME && !focusMenuOpen && !timerDoneDialogOpen && !wifiForgetConfirmOpen && !sleepOff) {
     static unsigned long lastBuddyAnimMs = 0;
     bool anyBuddy = false;
     for (int s = 0; s < HOME_SLOT_COUNT; s++) {
