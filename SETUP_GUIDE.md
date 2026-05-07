@@ -230,7 +230,7 @@ function doGet(e) {
   // Gelen etkinlikleri kontrol et ve sırdaşında olan yaklaşan ilk etkinliği yakala
   for (var i = 0; i < events.length; i++) {
     // Tüm gün süren etkinlikler (mesela doğum günleri) genelde masa saati için elenir
-    if (!events[i].isAllDayEvent()) {
+    if (!events[i].isAllDayEvent() && events[i].getStartTime() > now) {
       nextEvent = events[i];
       break; 
     }
@@ -258,6 +258,109 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 ```
+
+---
+
+## Appendix: Spotify Integration Setup (Now Playing)
+
+To show currently playing music from Spotify on Deskbuddy automatically without storing sensitive authorization codes on the ESP32 itself, you will use a Google Apps Script proxy.
+
+### Step 1: Create a Spotify App
+1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and log in.
+2. Click **Create App**. 
+3. Name it "Deskbuddy". Enter any description.
+4. For **Redirect URIs**, enter exactly: `https://script.google.com/macros/` (Wait, Google Apps Scripts redirect URIs actually end in `/usercallback` usually, but this script fetches the URL directly. Use `https://script.google.com/macros/` or come back here to paste the final web-app URL later. For safety, just add `https://script.google.com/macros/`).
+5. Agree to Terms and click **Save**.
+6. Open your App settings and copy your **Client ID** and **Client Secret**.
+
+### Step 2: Create the Google Apps Script
+1. Go to [script.google.com](https://script.google.com) and click **New Project**.
+2. Go to **Project Settings** (the gear icon on the left panel).
+3. Scroll down to **Script Properties** and click **Add script property**.
+   - Add property `SPOTIFY_CLIENT_ID` and paste your Spotify Client ID.
+   - Add property `SPOTIFY_CLIENT_SECRET` and paste your Spotify Client Secret.
+4. Go back to the **Editor** (`< >` icon) and replace `Code.gs` with the following:
+
+```javascript
+var CLIENT_ID = PropertiesService.getScriptProperties().getProperty('SPOTIFY_CLIENT_ID');
+var CLIENT_SECRET = PropertiesService.getScriptProperties().getProperty('SPOTIFY_CLIENT_SECRET');
+
+function doGet(e) {
+  var props = PropertiesService.getUserProperties();
+  var refreshToken = props.getProperty("SPOTIFY_REFRESH_TOKEN");
+  var redirectUri = ScriptApp.getService().getUrl();
+  
+  if (!refreshToken) {
+    if (e.parameter.code) {
+      var payload = {
+        "grant_type": "authorization_code", "code": e.parameter.code, "redirect_uri": redirectUri
+      };
+      
+      var res = UrlFetchApp.fetch("https://accounts.spotify.com/api/token", {
+        "method": "post",
+        "headers": { "Authorization": "Basic " + Utilities.base64Encode(CLIENT_ID + ":" + CLIENT_SECRET) },
+        "payload": payload, "muteHttpExceptions": true
+      });
+      var json = JSON.parse(res.getContentText());
+      
+      if (json.refresh_token) {
+        props.setProperty("SPOTIFY_REFRESH_TOKEN", json.refresh_token);
+        return ContentService.createTextOutput("Success! You can now close this tab and paste the Web App URL into Deskbuddy.");
+      } else {
+        return ContentService.createTextOutput("Error: Did you add this script URL to your Spotify Redirect URIs? " + res.getContentText());
+      }
+    } else {
+      var authUrl = "https://accounts.spotify.com/authorize?client_id=" + CLIENT_ID + "&response_type=code&redirect_uri=" + encodeURIComponent(redirectUri) + "&scope=user-read-currently-playing";
+      var html = "<div style='font-family: sans-serif; text-align: center; margin-top: 50px;'><h2>Spotify Yetkilendirmesi Gerekiyor</h2><a href='" + authUrl + "' target='_top' style='padding: 10px 20px; background-color: #1DB954; color: white; text-decoration: none; border-radius: 50px; font-weight: bold; font-size: 16px;'>Spotify'a Baglan</a></div>";
+      return HtmlService.createHtmlOutput(html);
+    }
+  }
+  
+  var tokenRes = UrlFetchApp.fetch("https://accounts.spotify.com/api/token", {
+    "method": "post",
+    "headers": { "Authorization": "Basic " + Utilities.base64Encode(CLIENT_ID + ":" + CLIENT_SECRET) },
+    "payload": { "grant_type": "refresh_token", "refresh_token": refreshToken }, "muteHttpExceptions": true
+  });
+  var accessToken = JSON.parse(tokenRes.getContentText()).access_token;
+  
+  if (!accessToken) {
+    props.deleteProperty("SPOTIFY_REFRESH_TOKEN");
+    return ContentService.createTextOutput(JSON.stringify({song: "Error", artist: "Token exp.", playing: false}));
+  }
+  
+  var playRes = UrlFetchApp.fetch("https://api.spotify.com/v1/me/player/currently-playing", {
+    "method": "get", "headers": { "Authorization": "Bearer " + accessToken }, "muteHttpExceptions": true
+  });
+  if (playRes.getResponseCode() == 204 || playRes.getContentText() == "") {
+    return ContentService.createTextOutput(JSON.stringify({song: "Spotify Uykuda", artist: "", playing: false}));
+  }
+  
+  var playJson = JSON.parse(playRes.getContentText());
+  if (playJson && playJson.item && playJson.is_playing) {
+    return ContentService.createTextOutput(JSON.stringify({ song: playJson.item.name, artist: playJson.item.artists[0].name, playing: true }));
+  } else {
+    return ContentService.createTextOutput(JSON.stringify({song: "Durduruldu", artist: "", playing: false}));
+  }
+}
+```
+
+### Step 3: Deploy & Authenticate
+1. Click **Deploy > New deployment**.
+2. Select **Web app**. Change "Who has access" to **Anyone**. Click Deploy.
+3. **CRITICAL:** Copy the **Web App URL**.
+4. Go back to your Spotify Developer Dashboard. Edit your app settings, and paste this exact Google Web App URL into the **Redirect URIs** list. Save the Spotify app.
+5. Open a new tab in your browser and go to your **Web App URL**.
+6. Google will ask for permission, approve it. Then click the large **Connect to Spotify** button. It will ask for permission, approve it. It should say **"Success!"**.
+
+> [!WARNING]
+> If Spotify throws a black screen saying **`INVALID_CLIENT: Invalid redirect URI`** or **`Not matching configuration`**:
+> This happens because Google generates a brand-new URL hash every time you click "New Deployment". 
+> 1. Copy the newest URL from the top of your current browser tab.
+> 2. Go back to your Spotify Dashboard Settings.
+> 3. Delete the old URL from **Redirect URIs**, paste the newest URL, click **Add**, and **Save**.
+> 4. Go back to your tab, click the green button again. It will work perfectly!
+
+7. Keep that final working **Web App URL**, go to Deskbuddy's local IP, and paste the URL into the **Spotify Proxy URL** field. Done!
 
 3. Click **Deploy > New deployment** in the top right corner.
 4. Click the gear icon next to "Select type" and choose **Web app**.

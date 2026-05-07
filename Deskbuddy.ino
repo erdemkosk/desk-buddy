@@ -190,6 +190,12 @@ String nextEventTime = "--";
 time_t lastCalendarFetch = 0;
 const uint32_t CALENDAR_INTERVAL_SEC = 15 * 60;
 
+String spotifyUrl = "";
+String spotifySong = "";
+String spotifyArtist = "";
+bool spotifyPlaying = false;
+time_t lastSpotifyFetch = 0;
+
 const char *homeWidgetKey(HomeWidgetType type) {
   switch (type) {
   case HOME_WIDGET_HUMIDITY:
@@ -216,6 +222,8 @@ const char *homeWidgetKey(HomeWidgetType type) {
     return "notes";
   case HOME_WIDGET_CALENDAR:
     return "calendar";
+  case HOME_WIDGET_SPOTIFY:
+    return "spotify";
   default:
     return "humidity";
   }
@@ -247,6 +255,8 @@ const char *homeWidgetLabel(HomeWidgetType type) {
     return "Notlar";
   case HOME_WIDGET_CALENDAR:
     return "Takvim";
+  case HOME_WIDGET_SPOTIFY:
+    return "Spotify";
   default:
     return "Nem";
   }
@@ -277,6 +287,8 @@ HomeWidgetType homeWidgetFromKey(const String &key) {
     return HOME_WIDGET_NOTES;
   if (key == "calendar")
     return HOME_WIDGET_CALENDAR;
+  if (key == "spotify")
+    return HOME_WIDGET_SPOTIFY;
   return HOME_WIDGET_HUMIDITY;
 }
 
@@ -310,7 +322,8 @@ void appendHomeWidgetOptions(String &page, const String &selectedKey) {
       HOME_WIDGET_HUMIDITY, HOME_WIDGET_TIMER, HOME_WIDGET_RAIN,
       HOME_WIDGET_OUTDOOR,  HOME_WIDGET_KP,    HOME_WIDGET_UV,
       HOME_WIDGET_WIND,     HOME_WIDGET_SUN,   HOME_WIDGET_FINANCE,
-      HOME_WIDGET_BUDDY,    HOME_WIDGET_NOTES, HOME_WIDGET_CALENDAR};
+      HOME_WIDGET_BUDDY,    HOME_WIDGET_NOTES, HOME_WIDGET_CALENDAR,
+      HOME_WIDGET_SPOTIFY};
 
   for (HomeWidgetType type : types) {
     const char *key = homeWidgetKey(type);
@@ -1688,6 +1701,52 @@ void ensureCalendar() {
     dataDirty = true;
 }
 
+static bool fetchSpotifyData() {
+  if (WiFi.status() != WL_CONNECTED || spotifyUrl.length() < 10)
+    return false;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(15000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+  bool got = false;
+  if (http.begin(client, spotifyUrl)) {
+    if (http.GET() == 200) {
+      String body = http.getString();
+      DynamicJsonDocument doc(512);
+      if (!deserializeJson(doc, body)) {
+        if (doc.containsKey("song")) {
+          spotifySong = doc["song"].as<String>();
+          spotifyArtist = doc["artist"].as<String>();
+          spotifyPlaying = doc["playing"].as<bool>();
+          got = true;
+        }
+      }
+    }
+    http.end();
+  }
+
+  if (got || spotifyUrl.length() >= 10) {
+    lastSpotifyFetch = time(nullptr);
+    lastSyncTime = lastSpotifyFetch;
+  }
+  return got;
+}
+
+void ensureSpotify() {
+  if (WiFi.status() != WL_CONNECTED)
+    return;
+  time_t nowT = time(nullptr);
+  bool stale = (lastSpotifyFetch == 0) ||
+               ((nowT - lastSpotifyFetch) > (time_t)SPOTIFY_INTERVAL_SEC);
+  if (!stale && spotifySong.length() > 0)
+    return;
+  if (fetchSpotifyData())
+    dataDirty = true;
+}
+
 // =========================================================
 // DRAW HELPERS
 // =========================================================
@@ -2715,6 +2774,61 @@ void drawCalendarHomeWidget(int x, int y, int w, int h, String &cache,
                                force, nextEventTitle);
 }
 
+void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
+                           bool force = false) {
+  String statusText = spotifyPlaying ? "Caliyor" : "Durdu";
+  String text = spotifySong;
+  if (spotifyArtist.length() > 0)
+    text += " - " + spotifyArtist;
+  if (spotifySong == "" || spotifySong == "Error")
+    text = "Baglanti Bekleniyor";
+
+  String combined = String("Spot") + "|" + text + "|" + statusText;
+  if (!force && !spotifyPlaying && combined == cache)
+    return;
+  if (!spotifyPlaying)
+    cache = combined;
+
+  makeSpriteCard(sprSmall, w, h, spotifyPlaying);
+
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("Spotify", 10, 8, 2);
+
+  sprSmall.setTextDatum(TR_DATUM);
+  sprSmall.setTextColor(spotifyPlaying ? COL_GREEN : COL_DIM, COL_PANEL);
+  sprSmall.drawString(statusText, w - 8, 8, 1);
+  sprSmall.setTextDatum(TL_DATUM);
+
+  int scrollWidth = sprSmall.textWidth(text, 2);
+  int viewWidth = w - 20;
+
+  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  if (scrollWidth <= viewWidth || !spotifyPlaying) {
+    sprSmall.drawString(text, 10, 36, 2);
+  } else {
+    static int scrollX = 0;
+    static unsigned long lastTick = 0;
+    if (millis() - lastTick > 35) {
+      scrollX--;
+      if (scrollX < -(scrollWidth))
+        scrollX = viewWidth;
+      lastTick = millis();
+    }
+
+    // Draw text with offset
+    sprSmall.drawString(text, 10 + scrollX, 36, 2);
+
+    // Re-draw the left and right border areas to hide overflowing text
+    sprSmall.fillRect(0, 30, 9, 30, COL_PANEL);
+    sprSmall.fillRect(w - 9, 30, 9, 30, COL_PANEL);
+    sprSmall.drawRoundRect(0, 0, w, h, 10,
+                           spotifyPlaying ? COL_ACCENT : COL_STROKE);
+  }
+
+  pushSpriteAndDelete(sprSmall, x, y);
+}
+
 void drawHomeSlotWidget(int slot, bool force = false) {
   int x, y, w, h;
   getHomeSlotRect(slot, x, y, w, h);
@@ -2764,6 +2878,9 @@ void drawHomeSlotWidget(int slot, bool force = false) {
     break;
   case HOME_WIDGET_CALENDAR:
     drawCalendarHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    break;
+  case HOME_WIDGET_SPOTIFY:
+    drawSpotifyHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
     break;
   }
 }
@@ -3468,6 +3585,7 @@ void setup() {
   ensureKpIndex();
   ensureFinance();
   ensureCalendar();
+  ensureSpotify();
 
   setupWebServer();
 
@@ -3509,9 +3627,18 @@ void updateMeetingFlashState() {
       wasMeetingFlashing = true;
       bool flashOn = (millis() / 200UL) % 2UL == 0;
       setBacklight(flashOn ? FLASH_BL_HIGH : FLASH_BL_LOW);
-    } else if (wasMeetingFlashing) {
-      wasMeetingFlashing = false;
-      setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
+    } else {
+      if (wasMeetingFlashing) {
+        wasMeetingFlashing = false;
+        setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
+      }
+      if (tmNow.tm_hour > eh || (tmNow.tm_hour == eh && tmNow.tm_min > em)) {
+        nextEventTitle = "Guncelleniyor...";
+        nextEventTime = "--:--";
+        lastCalendarFetch = 0;
+        dataDirty = true;
+        pageDirty = true;
+      }
     }
   }
 }
@@ -3584,6 +3711,7 @@ void loop() {
     ensureKpIndex();
     ensureFinance();
     ensureCalendar();
+    ensureSpotify();
   }
 
   if (millis() - lastClockTick >= CLOCK_TICK_MS) {
@@ -3602,17 +3730,19 @@ void loop() {
   if (currentPage == PAGE_HOME && !focusMenuOpen && !timerDoneDialogOpen &&
       !wifiForgetConfirmOpen && !sleepOff) {
     static unsigned long lastBuddyAnimMs = 0;
-    bool anyBuddy = false;
+    bool needsAnim = false;
     for (int s = 0; s < HOME_SLOT_COUNT; s++) {
-      if (homeWidgetSlots[s] == HOME_WIDGET_BUDDY) {
-        anyBuddy = true;
+      if (homeWidgetSlots[s] == HOME_WIDGET_BUDDY ||
+          (homeWidgetSlots[s] == HOME_WIDGET_SPOTIFY && spotifyPlaying)) {
+        needsAnim = true;
         break;
       }
     }
-    if (anyBuddy && millis() - lastBuddyAnimMs >= 70UL) {
+    if (needsAnim && millis() - lastBuddyAnimMs >= 70UL) {
       lastBuddyAnimMs = millis();
       for (int s = 0; s < HOME_SLOT_COUNT; s++) {
-        if (homeWidgetSlots[s] == HOME_WIDGET_BUDDY)
+        if (homeWidgetSlots[s] == HOME_WIDGET_BUDDY ||
+            (homeWidgetSlots[s] == HOME_WIDGET_SPOTIFY && spotifyPlaying))
           drawHomeSlotWidget(s, false);
       }
     }

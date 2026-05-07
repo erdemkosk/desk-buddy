@@ -44,6 +44,9 @@ extern HomeWidgetType homeWidgetSlots[HOME_SLOT_COUNT];
 extern String calendarUrl;
 extern time_t lastCalendarFetch;
 
+extern String spotifyUrl;
+extern time_t lastSpotifyFetch;
+
 extern bool notesDirty;
 extern bool pageDirty;
 extern bool dataDirty;
@@ -571,7 +574,8 @@ static void handleRoot() {
       "&nbsp;&nbsp;var events = calendar.getEvents(now, endOfDay);<br>"
       "&nbsp;&nbsp;var nextEvent = null;<br>"
       "&nbsp;&nbsp;for (var i = 0; i < events.length; i++) {<br>"
-      "&nbsp;&nbsp;&nbsp;&nbsp;if (!events[i].isAllDayEvent()) {<br>"
+      "&nbsp;&nbsp;&nbsp;&nbsp;if (!events[i].isAllDayEvent() && "
+      "events[i].getStartTime() > now) {<br>"
       "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;nextEvent = events[i]; break;<br>"
       "&nbsp;&nbsp;&nbsp;&nbsp;}<br>"
       "&nbsp;&nbsp;}<br>"
@@ -597,6 +601,38 @@ static void handleRoot() {
   page +=
       "<li>Size verilen <b>Web uygulamasının URL'si</b> yazan linki kopyalayıp "
       "yukarıdaki kutuya yapıştırın ve Deskbuddy'ye kaydedin.</li>";
+  page += "</ol></details>";
+  page += "</div></div>";
+
+  page += "<div class='panel' data-panel='spotify'>";
+  page += "<button type='button' class='panel-toggle' "
+          "aria-expanded='true'><h2>Spotify (Google Apps)</h2><span "
+          "class='panel-chevron'>&#9662;</span></button>";
+  page += "<div class='panel-body'>";
+  page += "<p>Hangi şarkının çaldığını kayan yazıyla görmek için Proxy URL "
+          "ekle.</p>";
+  page += "<label class='label'>Spotify Proxy URL</label>";
+  page += "<input type='text' name='spotifyUrl' value='" +
+          htmlEscape(spotifyUrl) + "'>";
+  page += "<details "
+          "style='margin-top:12px;cursor:pointer;color:#8ea3ba;font-size:13px;'"
+          "><summary><b>Nasıl Kurulur? (Tıkla ve Öğren)</b></summary>";
+  page += "<ol style='padding-left:20px;margin-top:8px;line-height:1.6;'>";
+  page +=
+      "<li>Spotify Developer (geliştirici) sayfasından ücretsiz bir uygulama "
+      "açarak <b>Client ID</b> ve <b>Client Secret</b> edinin.</li>";
+  page +=
+      "<li><b>script.google.com</b> adresinde yeni bir proje oluşturun.</li>";
+  page += "<li>Deskbuddy Proje dosyalarındaki <b>SETUP_GUIDE.md</b> belgesinin "
+          "en altındaki uzun scripti kopyalayıp editöre yapıştırın.</li>";
+  page += "<li>Sol taraftan Proje Ayarları çarkına (Ayarlar) tıklayıp <b>Komut "
+          "dosyası özellikleri</b> (Script properties) kısmına bu ID ve Secret "
+          "kodlarını ekleyip kaydedin.</li>";
+  page += "<li>Dağıt (Deploy) ekranından erişimi <b>Herkes</b> (Anyone) "
+          "yaparak onaylayın.</li>";
+  page +=
+      "<li>Açılan yetkilendirme linklerine tıklayıp Spotify hesabınıza (kendi "
+      "kendinize) izin verin. Gelen Web URL'yi bu kutuya yapıştırın!</li>";
   page += "</ol></details>";
   page += "</div></div>";
 
@@ -696,6 +732,9 @@ static void handleSave() {
   String newCalUrl =
       server.hasArg("calUrl") ? server.arg("calUrl") : calendarUrl;
   newCalUrl.trim();
+  String newSpotifyUrl =
+      server.hasArg("spotifyUrl") ? server.arg("spotifyUrl") : spotifyUrl;
+  newSpotifyUrl.trim();
   HomeWidgetType newHomeSlots[HOME_SLOT_COUNT];
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     String key = String("homeSlot") + String(i);
@@ -743,6 +782,7 @@ static void handleSave() {
   LAT = newLat;
   LNG = newLng;
   calendarUrl = newCalUrl;
+  spotifyUrl = newSpotifyUrl;
   unitKey = newUnits;
   regionFormatKey = newRegion;
   flashModeEnabled = newFlashMode;
@@ -770,6 +810,7 @@ static void handleSave() {
   prefs.putInt("sleepMin", sleepIntervalMin);
   prefs.putBool("flashMode", flashModeEnabled);
   prefs.putString("calUrl", calendarUrl);
+  prefs.putString("spotifyUrl", spotifyUrl);
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     String key = String("homeSlot") + String(i);
     prefs.putString(key.c_str(), homeWidgetKey(homeWidgetSlots[i]));
@@ -784,6 +825,7 @@ static void handleSave() {
   restoreSleepAwareBacklight();
 
   lastCalendarFetch = 0;
+  lastSpotifyFetch = 0;
 
   notesDirty = true;
   pageDirty = true;
