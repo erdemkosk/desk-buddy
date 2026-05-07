@@ -1713,9 +1713,13 @@ void pollNtfyIfDue() {
   client.setInsecure();
   client.setTimeout(12000);
 
-  String url = String("https://ntfy.sh/") + topic + "/json";
-  if (scanAll) url += "?since=all";
-  else url += "?since=" + lastIdPersisted;
+  /* poll=1: bağlantı tüm bekleyen satırlar okununca KAPANır. poll yoksa abonelik açık kalır;
+   * ESP'de bağlantı/önbellek tekrarı = aynı mesajlar tekrar görünebilir. */
+  String url = String("https://ntfy.sh/") + topic + "/json?poll=1";
+  if (scanAll)
+    url += "&since=all";
+  else
+    url += "&since=" + lastIdPersisted;
 
   HTTPClient http;
   http.setTimeout(12000);
@@ -1733,11 +1737,14 @@ void pollNtfyIfDue() {
   String candTitle = "ntfy";
   String candBody;
   bool haveMessageEvent = false;
-  unsigned long watchdog = millis() + 25000UL;
+  /* since=all ilk senkonda çok satır gelebilir; lineCap koparma imleci yarıda bırakıp sonra tekrar mesaj çıkarır. */
+  unsigned long watchdog = millis() + (scanAll ? 55000UL : 25000UL);
+  const int lineCapScanAll = 4000;
+  const int lineCapNormal = 400;
   int lineCap = 0;
 
   for (;;) {
-    if (millis() > watchdog || lineCap >= 260) break;
+    if (millis() > watchdog || lineCap >= (scanAll ? lineCapScanAll : lineCapNormal)) break;
     if (!stream.available()) {
       if (!http.connected()) break;
       delay(5);
