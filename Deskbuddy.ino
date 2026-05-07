@@ -196,6 +196,7 @@ String spotifyArtist = "";
 bool spotifyPlaying = false;
 time_t lastSpotifyFetch = 0;
 const uint32_t SPOTIFY_INTERVAL_SEC = 15;
+SemaphoreHandle_t spotifyMutex = NULL;
 
 const char *homeWidgetKey(HomeWidgetType type) {
   switch (type) {
@@ -1702,6 +1703,21 @@ void ensureCalendar() {
     dataDirty = true;
 }
 
+static void cleanTr(String &s) {
+  s.replace("ş", "s");
+  s.replace("Ş", "S");
+  s.replace("ı", "i");
+  s.replace("İ", "I");
+  s.replace("ğ", "g");
+  s.replace("Ğ", "G");
+  s.replace("ü", "u");
+  s.replace("Ü", "U");
+  s.replace("ö", "o");
+  s.replace("Ö", "O");
+  s.replace("ç", "c");
+  s.replace("Ç", "C");
+}
+
 static bool fetchSpotifyData() {
   if (WiFi.status() != WL_CONNECTED || spotifyUrl.length() < 10)
     return false;
@@ -1719,10 +1735,21 @@ static bool fetchSpotifyData() {
       DynamicJsonDocument doc(512);
       if (!deserializeJson(doc, body)) {
         if (doc.containsKey("song")) {
-          spotifySong = doc["song"].as<String>();
-          spotifyArtist = doc["artist"].as<String>();
-          spotifyPlaying = doc["playing"].as<bool>();
+          String sSong = doc["song"].as<String>();
+          String sArtist = doc["artist"].as<String>();
+          cleanTr(sSong);
+          cleanTr(sArtist);
+          bool sPlaying = doc["playing"].as<bool>();
+
+          if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
+            spotifySong = sSong;
+            spotifyArtist = sArtist;
+            spotifyPlaying = sPlaying;
+            lastSpotifyFetch = time(nullptr);
+            xSemaphoreGive(spotifyMutex);
+          }
           got = true;
+          dataDirty = true;
         }
       }
     }
@@ -1730,22 +1757,30 @@ static bool fetchSpotifyData() {
   }
 
   if (got || spotifyUrl.length() >= 10) {
-    lastSpotifyFetch = time(nullptr);
-    lastSyncTime = lastSpotifyFetch;
+    if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
+      lastSpotifyFetch = time(nullptr);
+      lastSyncTime = lastSpotifyFetch;
+      xSemaphoreGive(spotifyMutex);
+    }
   }
   return got;
 }
 
-void ensureSpotify() {
-  if (WiFi.status() != WL_CONNECTED)
-    return;
-  time_t nowT = time(nullptr);
-  bool stale = (lastSpotifyFetch == 0) ||
-               ((nowT - lastSpotifyFetch) > (time_t)SPOTIFY_INTERVAL_SEC);
-  if (!stale && spotifySong.length() > 0)
-    return;
-  if (fetchSpotifyData())
-    dataDirty = true;
+void spotifyFetchTask(void *pvParameters) {
+  while (true) {
+    if (WiFi.status() == WL_CONNECTED && spotifyUrl.length() >= 10) {
+      time_t nowT = time(nullptr);
+      time_t lastF = 0;
+      if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
+        lastF = lastSpotifyFetch;
+        xSemaphoreGive(spotifyMutex);
+      }
+      if (lastF == 0 || (nowT - lastF) > SPOTIFY_INTERVAL_SEC) {
+        fetchSpotifyData();
+      }
+    }
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
 }
 
 // =========================================================
@@ -2777,35 +2812,50 @@ void drawCalendarHomeWidget(int x, int y, int w, int h, String &cache,
 
 void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
                            bool force = false) {
-  String statusText = spotifyPlaying ? "Caliyor" : "Durdu";
-  String text = spotifySong;
-  if (spotifyArtist.length() > 0)
-    text += " - " + spotifyArtist;
-  if (spotifySong == "" || spotifySong == "Error")
+  String localSong = "Baglanti Bekleniyor";
+  String localArtist = "";
+  bool localPlaying = false;
+
+  if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
+    localSong = spotifySong;
+    localArtist = spotifyArtist;
+    localPlaying = spotifyPlaying;
+    xSemaphoreGive(spotifyMutex);
+  }
+
+  String text = localSong;
+  if (localArtist.length() > 0)
+    text += " - " + localArtist;
+  if (localSong == "" || localSong == "Error")
     text = "Baglanti Bekleniyor";
 
-  String combined = String("Spot") + "|" + text + "|" + statusText;
-  if (!force && !spotifyPlaying && combined == cache)
+  String combined = String("S") + (localPlaying ? "1" : "0") + "|" + text;
+  if (!force && !localPlaying && combined == cache)
     return;
-  if (!spotifyPlaying)
+  if (!localPlaying)
     cache = combined;
 
-  makeSpriteCard(sprSmall, w, h, spotifyPlaying);
+  makeSpriteCard(sprSmall, w, h, localPlaying);
 
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
   sprSmall.drawString("Spotify", 10, 8, 2);
 
-  sprSmall.setTextDatum(TR_DATUM);
-  sprSmall.setTextColor(spotifyPlaying ? COL_GREEN : COL_DIM, COL_PANEL);
-  sprSmall.drawString(statusText, w - 8, 8, 1);
+  if (localPlaying) {
+    int px = w - 16;
+    int py = 12;
+    sprSmall.fillTriangle(px, py, px, py + 8, px + 8, py + 4, COL_GREEN);
+  } else {
+    sprSmall.fillCircle(w - 12, 16, 4, TFT_RED);
+  }
+
   sprSmall.setTextDatum(TL_DATUM);
 
   int scrollWidth = sprSmall.textWidth(text, 2);
   int viewWidth = w - 20;
 
   sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  if (scrollWidth <= viewWidth || !spotifyPlaying) {
+  if (scrollWidth <= viewWidth || !localPlaying) {
     sprSmall.drawString(text, 10, 36, 2);
   } else {
     static int scrollX = 0;
@@ -2824,7 +2874,7 @@ void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
     sprSmall.fillRect(0, 30, 9, 30, COL_PANEL);
     sprSmall.fillRect(w - 9, 30, 9, 30, COL_PANEL);
     sprSmall.drawRoundRect(0, 0, w, h, 10,
-                           spotifyPlaying ? COL_ACCENT : COL_STROKE);
+                           localPlaying ? COL_ACCENT : COL_STROKE);
   }
 
   pushSpriteAndDelete(sprSmall, x, y);
@@ -3586,7 +3636,12 @@ void setup() {
   ensureKpIndex();
   ensureFinance();
   ensureCalendar();
-  ensureSpotify();
+
+  spotifyMutex = xSemaphoreCreateMutex();
+  if (spotifyMutex) {
+    xTaskCreatePinnedToCore(spotifyFetchTask, "SpotifyTask", 6144, NULL, 1,
+                            NULL, 0);
+  }
 
   setupWebServer();
 
@@ -3633,7 +3688,7 @@ void updateMeetingFlashState() {
         wasMeetingFlashing = false;
         setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
       }
-      if (tmNow.tm_hour > eh || (tmNow.tm_hour == eh && tmNow.tm_min > em)) {
+      if (tmNow.tm_hour > eh || (tmNow.tm_hour == eh && tmNow.tm_min >= em)) {
         nextEventTitle = "Guncelleniyor...";
         nextEventTime = "--:--";
         lastCalendarFetch = 0;
@@ -3712,7 +3767,6 @@ void loop() {
     ensureKpIndex();
     ensureFinance();
     ensureCalendar();
-    ensureSpotify();
   }
 
   if (millis() - lastClockTick >= CLOCK_TICK_MS) {
