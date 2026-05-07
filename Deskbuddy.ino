@@ -297,7 +297,6 @@ String ntfyPopupTitleStr;
 String ntfyPopupBodyStr;
 unsigned long ntfyPopupUntilMs = 0;
 
-const unsigned long NTFY_POLL_INTERVAL_MS = 28000UL;
 const unsigned long NTFY_POPUP_VISIBLE_MS = 4000UL;
 static unsigned long lastNtfyPollMs = 0;
 static String cacheNtfyPopupComb = "";
@@ -873,6 +872,7 @@ void wakeDisplay(bool clearManualMode) {
   setBacklight(BL_FULL);
   pageDirty = true;
   touchResetGate();
+  lastNtfyPollMs = 0;
 }
 
 void enterSleepDim() {
@@ -1747,7 +1747,8 @@ void pollNtfyIfDue() {
     if (millis() > watchdog || lineCap >= (scanAll ? lineCapScanAll : lineCapNormal)) break;
     if (!stream.available()) {
       if (!http.connected()) break;
-      delay(5);
+      yield();
+      delay(2);
       if (!stream.available() && !http.connected()) break;
       continue;
     }
@@ -3253,7 +3254,6 @@ void loop() {
   updateFocusTimerState();
   updateTimerDoneDialogState();
   updateNtfyPopupExpiry();
-  pollNtfyIfDue();
   handleAutoSleep();
 
   int tx = 0, ty = 0;
@@ -3312,6 +3312,8 @@ void loop() {
       }
     }
   }
+
+  pollNtfyIfDue();
 
   if (millis() - lastDataTick >= DATA_TICK_MS) {
     lastDataTick = millis();

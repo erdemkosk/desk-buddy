@@ -16,3 +16,6 @@ inline constexpr const char* FIRMWARE_VERSION = "v1.2.1";
 
 /** Varsayilan ntfy.sh public topic (NVS anahtari: ntfyTopic). */
 inline constexpr const char* NTFY_DEFAULT_TOPIC = "deskbuddy";
+
+/** ntfy kisa anket HTTPS araligi (ms). Eskiden ~28sn idi; bildirimin gecikmesi bunun ust siniridir. */
+inline constexpr unsigned long NTFY_POLL_INTERVAL_MS = 5000UL;
