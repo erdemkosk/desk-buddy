@@ -201,3 +201,68 @@ Deskbuddy is designed to be easy to customize, but exact setup details may vary 
 For most users, the **TFT_eSPI `User_Setup.h` configuration is the most important part** of the installation.
 
 Once that is correct, the rest of the setup is usually straightforward.
+
+---
+
+## Appendix: Google Calendar Integration Setup
+
+To show your Google Calendar events on Deskbuddy, you must provide a **Google Apps Script URL** in the Deskbuddy web interface. Since ESP32 cannot handle Google's complex OAuth2 securely on its own, this proxy script fetches the events on its behalf.
+
+### How to get your URL:
+
+1. Go to [script.google.com](https://script.google.com) and click **New Project**.
+2. Replace all the code in the editor with this:
+
+```javascript
+function doGet(e) {
+  // Varsayılan (kendi) takvimini al
+  var calendar = CalendarApp.getDefaultCalendar();
+  
+  // Bugünü ve gün sonunu hesapla
+  var now = new Date();
+  var endOfDay = new Date();
+  endOfDay.setHours(23, 59, 59, 999);
+  
+  // Bugüne ait etkinlikleri getir
+  var events = calendar.getEvents(now, endOfDay);
+  var nextEvent = null;
+
+  // Gelen etkinlikleri kontrol et ve sırdaşında olan yaklaşan ilk etkinliği yakala
+  for (var i = 0; i < events.length; i++) {
+    // Tüm gün süren etkinlikler (mesela doğum günleri) genelde masa saati için elenir
+    if (!events[i].isAllDayEvent()) {
+      nextEvent = events[i];
+      break; 
+    }
+  }
+
+  // Çıktı hazırlığı
+  var responseData = {};
+  
+  if (nextEvent) {
+    responseData = {
+      status: "success",
+      title: nextEvent.getTitle(),
+      time: Utilities.formatDate(nextEvent.getStartTime(), Session.getScriptTimeZone(), "HH:mm")
+    };
+  } else {
+    responseData = {
+      status: "empty",
+      title: "Etkinlik Yok",
+      time: "--:--"
+    };
+  }
+
+  // Veriyi metin (JSON) formatında dışarı aktar
+  return ContentService.createTextOutput(JSON.stringify(responseData))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+```
+
+3. Click **Deploy > New deployment** in the top right corner.
+4. Click the gear icon next to "Select type" and choose **Web app**.
+5. Set **Who has access** to **Anyone** (this is strictly required so your ESP32 can fetch it without a manual login).
+6. Click **Deploy**.
+7. Google will ask you to authorize access to your calendar. Click **Authorize access**, select your Google account, click **Advanced**, and then click **Go to [Project Name] (unsafe)**. Allow the required permissions.
+8. Copy the **Web app URL** it generates (`https://script.google.com/macros/s/.../exec`).
+9. Paste this URL into the **Google Calendar** section in your Deskbuddy's Web Panel.

@@ -550,6 +550,54 @@ static void handleRoot() {
           "'>";
   page += "<div class='muted'>Örnek: "
           "https://script.google.com/macros/s/.../exec</div>";
+  page += "<details "
+          "style='margin-top:12px;cursor:pointer;color:#8ea3ba;font-size:13px;'"
+          "><summary><b>Nasıl URL Alınır? (Tıkla ve Öğren)</b></summary>";
+  page += "<ol style='padding-left:20px;margin-top:8px;line-height:1.6;'>";
+  page += "<li><a href='https://script.google.com' target='_blank' "
+          "style='color:#38bdf8;'>script.google.com</a> adresine gidin ve "
+          "'Yeni Proje' oluşturun.</li>";
+  page += "<li>Açılan editöre aşağıdaki <b>Google Apps Script</b> kodunu "
+          "yapıştırın:</li>";
+  page +=
+      "<div style='background:#0b1220;border:1px solid "
+      "#334155;padding:10px;border-radius:8px;overflow-x:auto;font-family:"
+      "monospace;margin:8px 0;'>"
+      "function doGet(e) {<br>"
+      "&nbsp;&nbsp;var calendar = CalendarApp.getDefaultCalendar();<br>"
+      "&nbsp;&nbsp;var now = new Date();<br>"
+      "&nbsp;&nbsp;var endOfDay = new Date();<br>"
+      "&nbsp;&nbsp;endOfDay.setHours(23, 59, 59, 999);<br>"
+      "&nbsp;&nbsp;var events = calendar.getEvents(now, endOfDay);<br>"
+      "&nbsp;&nbsp;var nextEvent = null;<br>"
+      "&nbsp;&nbsp;for (var i = 0; i < events.length; i++) {<br>"
+      "&nbsp;&nbsp;&nbsp;&nbsp;if (!events[i].isAllDayEvent()) {<br>"
+      "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;nextEvent = events[i]; break;<br>"
+      "&nbsp;&nbsp;&nbsp;&nbsp;}<br>"
+      "&nbsp;&nbsp;}<br>"
+      "&nbsp;&nbsp;var responseData = {};<br>"
+      "&nbsp;&nbsp;if (nextEvent) {<br>"
+      "&nbsp;&nbsp;&nbsp;&nbsp;responseData = { title: nextEvent.getTitle(), "
+      "time: Utilities.formatDate(nextEvent.getStartTime(), "
+      "Session.getScriptTimeZone(), \"HH:mm\") };<br>"
+      "&nbsp;&nbsp;} else {<br>"
+      "&nbsp;&nbsp;&nbsp;&nbsp;responseData = { title: \"Etkinlik Yok\", time: "
+      "\"--:--\" };<br>"
+      "&nbsp;&nbsp;}<br>"
+      "&nbsp;&nbsp;return "
+      "ContentService.createTextOutput(JSON.stringify(responseData))."
+      "setMimeType(ContentService.MimeType.JSON);<br>"
+      "}</div>";
+  page += "<li>Sağ üstten <b>Dağıt (Deploy)</b> &gt; <b>Yeni dağıtım</b> "
+          "seçeneğine tıklayın.</li>";
+  page += "<li>Tür olarak <b>Web Uygulaması</b>'nı tıklayın. <b>Erişim: "
+          "Herkes</b> (Anyone) olarak seçili olsun!</li>";
+  page += "<li>Dağıt'a basın. Karşınıza çıkan uyarıda kendi hesabınızla izin "
+          "verin (Advanced &gt; Go to script...).</li>";
+  page +=
+      "<li>Size verilen <b>Web uygulamasının URL'si</b> yazan linki kopyalayıp "
+      "yukarıdaki kutuya yapıştırın ve Deskbuddy'ye kaydedin.</li>";
+  page += "</ol></details>";
   page += "</div></div>";
 
   page += "<div class='panel' data-panel='widgets'>";

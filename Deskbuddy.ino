@@ -2646,10 +2646,49 @@ void drawNotesHomeWidget(int x, int y, int w, int h, String &cache,
                          bool force = false) {
   String notesPreview = notesText;
   notesPreview.replace("\n", " ");
-  if (notesPreview.length() > 20)
-    notesPreview = notesPreview.substring(0, 20) + "..";
+  notesPreview.trim();
 
-  String combined = String("Not") + "|" + notesPreview + "|" +
+  int mw = w - 20;
+  String L1 = "", L2 = "";
+  String src = notesPreview;
+
+  auto wrapLine = [&](String &remainder, bool isLastLine) -> String {
+    if (remainder.length() == 0)
+      return "";
+    if (tft.textWidth(remainder, 2) <= mw) {
+      String ret = remainder;
+      remainder = "";
+      return ret;
+    }
+    for (int i = remainder.length() - 1; i > 0; i--) {
+      String sub = remainder.substring(0, i);
+      String trySub = isLastLine ? sub + ".." : sub + "-";
+      if (tft.textWidth(trySub, 2) <= mw) {
+        int spaceIdx = sub.lastIndexOf(' ');
+        int actualLen = i;
+        if (spaceIdx > (i / 2)) {
+          actualLen = spaceIdx;
+          sub = remainder.substring(0, actualLen);
+          if (isLastLine)
+            sub += "..";
+        } else {
+          sub = trySub;
+        }
+        remainder = remainder.substring(actualLen);
+        remainder.trim();
+        return sub;
+      }
+    }
+    // If we can't fit even 1 character (which shouldn't happen), force break
+    String fallback = remainder.substring(0, 1);
+    remainder = remainder.substring(1);
+    return fallback;
+  };
+
+  L1 = wrapLine(src, false);
+  L2 = wrapLine(src, true);
+
+  String combined = String("Not") + "|" + L1 + "|" + L2 + "|" +
                     String(COL_PANEL) + "|" + String(COL_STROKE) + "|" +
                     String(COL_TEXT);
   if (!force && combined == cache)
@@ -2662,8 +2701,10 @@ void drawNotesHomeWidget(int x, int y, int w, int h, String &cache,
   sprSmall.drawString("Notlar", 10, 8, 2);
 
   sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  // Using font size 2 to fit the text better than the big metric numbers
-  sprSmall.drawString(notesPreview, 10, 31, 2);
+  sprSmall.drawString(L1, 10, 29, 2);
+  if (L2.length() > 0) {
+    sprSmall.drawString(L2, 10, 45, 2);
+  }
 
   pushSpriteAndDelete(sprSmall, x, y);
 }
@@ -3444,11 +3485,43 @@ void setup() {
   Serial.println(WiFi.localIP());
 }
 
+static bool wasMeetingFlashing = false;
+
+void updateMeetingFlashState() {
+  if (sleepOff || nextEventTime == "--" || nextEventTime.length() < 4) {
+    if (wasMeetingFlashing) {
+      wasMeetingFlashing = false;
+      setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
+    }
+    return;
+  }
+
+  int eh, em;
+  if (sscanf(nextEventTime.c_str(), "%d:%d", &eh, &em) == 2) {
+    time_t nowT = time(nullptr);
+    struct tm tmNow;
+    localtime_r(&nowT, &tmNow);
+
+    bool isFlashingTime =
+        (tmNow.tm_hour == eh && tmNow.tm_min == em && tmNow.tm_sec < 5);
+
+    if (isFlashingTime) {
+      wasMeetingFlashing = true;
+      bool flashOn = (millis() / 200UL) % 2UL == 0;
+      setBacklight(flashOn ? FLASH_BL_HIGH : FLASH_BL_LOW);
+    } else if (wasMeetingFlashing) {
+      wasMeetingFlashing = false;
+      setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
+    }
+  }
+}
+
 void loop() {
   server.handleClient();
   updateWiFiConnectionState();
   updateFocusTimerState();
   updateTimerDoneDialogState();
+  updateMeetingFlashState();
   handleAutoSleep();
 
   int tx = 0, ty = 0;
