@@ -11,7 +11,6 @@
 // - Uptime added to Status page
 // - Wi-Fi: NVS keys wifiSsid / wifiPass; first boot opens AP + WIFI: QR (telefon ile ag katilimi) + 192.168.4.1
 // - Ust bar wifi unut: NVS sil, onay (Evet/Hayir) sonra kurulum AP
-// - Uzaktan ntfy (topic + paylasilan token): DESK: komutu + mesaj ilk satiri = token — HTTP poll, ekranda kitlenmez
 
 // Arduino: otomatik fonksiyon prototipleri son #include'dan sonra eklenir;
 // parametre tipleri (HomeWidgetType, WxKind) include'lardan once tanimlanir.
@@ -35,7 +34,6 @@
 #include "Deskbuddy_layout.h"
 #include "db_wifi_provision.h"
 #include "db_web_server.h"
-#include "db_ntfy_remote.h"
 
 // =========================================================
 // DISPLAY / TOUCH
@@ -2259,60 +2257,36 @@ void drawHomeSlotWidget(int slot, bool force = false) {
   int x, y, w, h;
   getHomeSlotRect(slot, x, y, w, h);
 
-  static const String hidTag("!hid");
-  bool forceDraw = force;
-  if ((((deskRemoteHideSlotBits >> slot) & 1) == 0) && cacheHomeSlots[slot] == hidTag) {
-    cacheHomeSlots[slot] = "";
-    forceDraw = true;
-  }
-
-  if (((deskRemoteHideSlotBits >> slot) & 1) != 0) {
-    if (!forceDraw && cacheHomeSlots[slot] == hidTag) return;
-    tft.fillRoundRect(x, y, w, h, 10, COL_PANEL);
-    tft.drawRoundRect(x, y, w, h, 10, COL_STROKE);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("Uzaktan", x + w / 2, y + h / 2 - 6, 2);
-    tft.drawString("kapali", x + w / 2, y + h / 2 + 10, 1);
-    tft.setTextDatum(TL_DATUM);
-    cacheHomeSlots[slot] = hidTag;
-    return;
-  }
-
   switch (homeWidgetSlots[slot]) {
     case HOME_WIDGET_HUMIDITY:
-      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_HUMIDITY), humidityText(), cacheHomeSlots[slot],
-                                   forceDraw);
+      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_HUMIDITY), humidityText(), cacheHomeSlots[slot], force);
       break;
     case HOME_WIDGET_TIMER:
-      drawFocusTimerWidget(x, y, w, h, cacheHomeSlots[slot], forceDraw);
+      drawFocusTimerWidget(x, y, w, h, cacheHomeSlots[slot], force);
       break;
     case HOME_WIDGET_RAIN:
-      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_RAIN), rainText(), cacheHomeSlots[slot], forceDraw);
+      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_RAIN), rainText(), cacheHomeSlots[slot], force);
       break;
     case HOME_WIDGET_OUTDOOR:
-      drawOutdoorHomeWidget(x, y, w, h, cacheHomeSlots[slot], forceDraw);
+      drawOutdoorHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
       break;
     case HOME_WIDGET_KP:
-      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_KP), kpText(), cacheHomeSlots[slot], forceDraw,
-                                   kpLevelText());
+      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_KP), kpText(), cacheHomeSlots[slot], force, kpLevelText());
       break;
     case HOME_WIDGET_UV:
-      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_UV), uvText(), cacheHomeSlots[slot], forceDraw,
-                                   uvLevelText());
+      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_UV), uvText(), cacheHomeSlots[slot], force, uvLevelText());
       break;
     case HOME_WIDGET_WIND:
-      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_WIND), windText(), cacheHomeSlots[slot], forceDraw,
-                                   windDirectionText());
+      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_WIND), windText(), cacheHomeSlots[slot], force, windDirectionText());
       break;
     case HOME_WIDGET_SUN:
-      drawSunEventWidget(x, y, w, h, cacheHomeSlots[slot], forceDraw);
+      drawSunEventWidget(x, y, w, h, cacheHomeSlots[slot], force);
       break;
     case HOME_WIDGET_FINANCE:
-      drawFinanceHomeWidget(x, y, w, h, cacheHomeSlots[slot], forceDraw);
+      drawFinanceHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
       break;
     case HOME_WIDGET_BUDDY:
-      drawBuddyHomeWidget(x, y, w, h, cacheHomeSlots[slot], forceDraw);
+      drawBuddyHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
       break;
   }
 }
@@ -2774,7 +2748,6 @@ bool handleHomeTouch(int x, int y) {
   if (focusMenuOpen) return handleFocusMenuTouch(x, y);
 
   for (int slot = 0; slot < HOME_SLOT_COUNT; slot++) {
-    if (((deskRemoteHideSlotBits >> slot) & 1) != 0) continue;
     if (homeWidgetSlots[slot] != HOME_WIDGET_TIMER) continue;
 
     int slotX, slotY, slotW, slotH;
@@ -2969,7 +2942,6 @@ void setup() {
   ensureFinance();
 
   setupWebServer();
-  deskNtfyInit();
 
   pageDirty = true;
   dataDirty = true;
@@ -2991,7 +2963,6 @@ void loop() {
   updateFocusTimerState();
   updateTimerDoneDialogState();
   handleAutoSleep();
-  deskNtfyApplyQueued();
 
   int tx = 0, ty = 0;
   if (touchNewPress(tx, ty)) {
@@ -3079,7 +3050,6 @@ void loop() {
     if (anyBuddy && millis() - lastBuddyAnimMs >= 70UL) {
       lastBuddyAnimMs = millis();
       for (int s = 0; s < HOME_SLOT_COUNT; s++) {
-        if (((deskRemoteHideSlotBits >> s) & 1) != 0) continue;
         if (homeWidgetSlots[s] == HOME_WIDGET_BUDDY)
           drawHomeSlotWidget(s, false);
       }
