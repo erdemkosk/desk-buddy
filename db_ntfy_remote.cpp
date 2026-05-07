@@ -10,6 +10,7 @@
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <cstring>
+#include <TFT_eSPI.h>
 
 #include "Deskbuddy_config.h"
 #include "Deskbuddy_types.h"
