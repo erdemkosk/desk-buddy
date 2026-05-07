@@ -9,7 +9,7 @@
 // - Wind direction uses Accent color
 // - Weather sun event field automatically shows Sunrise or Sunset, whichever is next
 // - Uptime added to Status page
-// - Wi-Fi: NVS keys wifiSsid / wifiPass; empty first boot opens AP Deskbuddy-Setup and http://192.168.4.1/
+// - Wi-Fi: NVS keys wifiSsid / wifiPass; first boot opens AP + WIFI: QR (telefon ile ag katilimi) + 192.168.4.1
 // - Ust bar wifi unut: NVS sil, onay (Evet/Hayir) sonra kurulum AP
 
 // Arduino: otomatik fonksiyon prototipleri son #include'dan sonra eklenir;
@@ -55,6 +55,8 @@ enum WxKind {
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <math.h>
+#include <stdio.h>
+#include "qrcode.h"
 
 // =========================================================
 // WIFI
@@ -2889,6 +2891,7 @@ static void handleProvisionRoot() {
   h += "input{width:100%;max-width:360px;padding:12px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#f1f5f9;box-sizing:border-box;font:inherit;}";
   h += "button{margin-top:18px;background:#38bdf8;border:none;color:#0c1220;padding:12px 20px;border-radius:10px;font-weight:800;cursor:pointer;font:inherit;}</style></head><body>";
   h += "<h1>Wi-Fi kurulumu</h1>";
+  h += "<p class='muted'>Once cihaz ekranindaki QR ile katilin; sonra bu formu kullanabilirsiniz.</p>";
   h += "<p>Ev aginizin adini ve sifresini girin. Kaydettikten sonra cihaz yeniden baslar ve bu aga baglanir.</p>";
   h += "<form method='POST' action='/savewifi'>";
   h += "<label>Ag adi (SSID)</label><input name='ssid' maxlength='32' required autocomplete='off'>";
@@ -2918,6 +2921,62 @@ static void handleProvisionSave() {
   ESP.restart();
 }
 
+/** Kurulum ekraninda WIFI:T:nopass ile ag katilimi QR (ricmoo/qrcode MIT). Alt metin ile dönüş y ekseni (px). */
+static int drawProvisionWifiJoinQr(int topY) {
+  char payload[128];
+  snprintf(payload, sizeof(payload), "WIFI:T:nopass;S:%s;P:;H:false;;", WIFI_AP_SSID);
+
+  static uint8_t qrWorkspace[1024];
+  QRCode qr;
+  int8_t ok = -1;
+
+  for (uint8_t ver = 4; ver <= 10; ver++) {
+    uint16_t need = qrcode_getBufferSize(ver);
+    if (need > sizeof(qrWorkspace)) break;
+    ok = qrcode_initText(&qr, qrWorkspace, ver, ECC_LOW, payload);
+    if (ok == 0) break;
+  }
+
+  if (ok != 0) {
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(COL_DIM, COL_BG);
+    tft.drawString("QR olusmadi,", 10, topY + 4, 1);
+    tft.drawString("elle ag secin:", 10, topY + 18, 1);
+    return topY + 36;
+  }
+
+  const uint8_t ms = qr.size;
+  int px = 4;
+  const int footerReserve = 104;
+  while (px >= 2) {
+    int qw = (int)ms * px;
+    int margin = px * 2;
+    if (topY + qw + margin * 2 + footerReserve <= SCREEN_H) break;
+    px--;
+  }
+
+  const int qw = (int)ms * px;
+  const int margin = px * 2;
+  const int ox = (SCREEN_W - qw) / 2;
+  const int oy = topY;
+
+  tft.fillRect(ox - margin, oy - margin, qw + 2 * margin, qw + 2 * margin, TFT_WHITE);
+  for (uint8_t y = 0; y < ms; y++) {
+    for (uint8_t x = 0; x < ms; x++) {
+      uint16_t c = qrcode_getModule(&qr, x, y) ? TFT_BLACK : TFT_WHITE;
+      tft.fillRect(ox + (int)x * px, oy + (int)y * px, px, px, c);
+    }
+  }
+
+  tft.setTextDatum(TC_DATUM);
+  tft.setTextColor(COL_DIM, COL_BG);
+  int capBaseline = oy + qw + margin + 2;
+  tft.drawString("Kamera ile QR okut", SCREEN_W / 2, capBaseline, 1);
+  tft.setTextDatum(TL_DATUM);
+
+  return capBaseline + 12;
+}
+
 /** Bos NVS + WiFi acik: AP acar, DNS yonlendirir, / formu. Sonunda ESP.restart. */
 void runWifiProvisioningIfNeeded() {
   if (!wifiEnabled) return;
@@ -2941,17 +3000,20 @@ void runWifiProvisioningIfNeeded() {
   tft.fillScreen(COL_BG);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(COL_TEXT, COL_BG);
-  tft.drawString("Wi-Fi kurulum", 10, 36, 2);
+  tft.drawString("Wi-Fi kurulum", 10, 4, 2);
   tft.setTextColor(COL_ACCENT, COL_BG);
-  tft.drawString("Ag: Deskbuddy-Setup", 10, 68, 2);
+  tft.drawString("QR -> ag katilimi", 10, 24, 1);
   tft.setTextColor(COL_DIM, COL_BG);
-  tft.drawString("Telefonda bu aga", 10, 100, 2);
-  tft.drawString("baglanin.", 10, 120, 2);
-  tft.drawString("Tarayici:", 10, 152, 2);
+  tft.drawString(WIFI_AP_SSID, 10, 38, 1);
+
+  int nextY = drawProvisionWifiJoinQr(50);
+  if (nextY < 200) nextY = 200;
+  tft.setTextColor(COL_DIM, COL_BG);
+  tft.drawString("Tarayici:", 10, nextY, 1);
   tft.setTextColor(COL_TEXT, COL_BG);
-  tft.drawString("192.168.4.1", 10, 174, 2);
+  tft.drawString("192.168.4.1", 10, nextY + 14, 2);
   tft.setTextColor(COL_DIM, COL_BG);
-  tft.drawString("Kayit -> otomatik reset", 10, 206, 1);
+  tft.drawString("Kayit -> otomatik reset", 10, nextY + 40, 1);
 
   for (;;) {
     dnsServer.processNextRequest();
