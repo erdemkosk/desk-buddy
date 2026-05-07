@@ -1410,21 +1410,27 @@ static void drawTopBarMoonSleepIcon(TFT_eSPI& g, int cx, int cy, uint16_t moonCo
   g.fillCircle(cx + 4, cy - 2, 7, maskBg);
 }
 
-/** Wi-Fi sifirlama / kurulum yenileme: dongusel yay + ok (sil/cop ile karismasin diye acik yay). */
+/** Wi-Fi kurulum sifir: once kayitli agi sil. Cop kutusu = sil; daha okunakli kucuk ikon. */
 static void drawTopBarWifiForgetIcon(TFT_eSPI& g, int cx, int cy, uint16_t fg) {
-  // Saat yonu acik yay (orta alt etrafindan ust sag'a), ok ucu kurulum/tekrar anlaminda
-  const struct { signed char dx; signed char dy; } pt[] = {
-      { -8, 3}, { -9, 1}, {-10, -1}, {-9, -4}, {-7, -6}, {-4, -8},
-      {  0, -9}, { 4, -8}, { 7, -6}, { 9, -3}
-  };
-  const int n = (int)(sizeof(pt) / sizeof(pt[0]));
-  for (int i = 1; i < n; i++) {
-    g.drawLine(cx + pt[i - 1].dx, cy + pt[i - 1].dy,
-               cx + pt[i].dx,     cy + pt[i].dy,     fg);
-  }
-  // Ok ucu (sag-ust, saat yonu devam)
-  g.drawLine(cx + 9, cy - 3, cx + 7, cy - 7, fg);
-  g.drawLine(cx + 9, cy - 3, cx + 5, cy - 3, fg);
+  const int xL = cx - 5;
+  const int xR = cx + 5;
+  const int yLidTop = cy - 7;
+  const int yHandleBot = cy - 4;
+  const int yBinTop = cy - 3;
+  const int yBinBot = cy + 7;
+
+  g.drawFastHLine(cx - 3, yLidTop, 7, fg);
+  g.drawFastVLine(cx - 1, yLidTop, yHandleBot - yLidTop + 1, fg);
+  g.drawFastVLine(cx + 1, yLidTop, yHandleBot - yLidTop + 1, fg);
+  g.drawFastHLine(xL, yHandleBot, xR - xL + 1, fg);
+
+  g.drawFastVLine(xL, yBinTop, yBinBot - yBinTop + 1, fg);
+  g.drawFastVLine(xR, yBinTop, yBinBot - yBinTop + 1, fg);
+  g.drawFastHLine(xL, yBinTop, xR - xL + 1, fg);
+  g.drawFastHLine(xL, yBinBot, xR - xL + 1, fg);
+
+  g.drawFastVLine(cx - 2, yBinTop + 2, 5, fg);
+  g.drawFastVLine(cx + 2, yBinTop + 2, 5, fg);
 }
 
 static void performWifiForgetAndRestart() {
