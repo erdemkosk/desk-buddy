@@ -159,7 +159,7 @@ static int topBarDimBtnX() { return topBarMoonBtnX() - TOPBAR_BTN_SZ - TOPBAR_BT
 static int topBarWifiForgetBtnX() { return topBarDimBtnX() - TOPBAR_BTN_SZ - TOPBAR_BTN_GAP; }
 
 /** Firmware semver; baslik yaninda gosterilir (drawTopBar). */
-static const char* FIRMWARE_VERSION = "v1.0.0";
+static const char* FIRMWARE_VERSION = "v1.1.0";
 
 const int HOME_GRID_Y1 = 120;
 const int HOME_GRID_Y2 = 198;
