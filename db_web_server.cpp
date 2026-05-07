@@ -64,6 +64,66 @@ extern String lastNextSunTime;
 extern String lastUptimeText;
 
 namespace {
+
+/** UTF-8 giris: Turkce harfleri ASCII esdegerlerine cevirir; diger non-ASCII codepointleri atlar. */
+static String asciiFoldTurkishUtf8ToAscii(const String& in) {
+  String out;
+  if (in.length() == 0) return out;
+  out.reserve(in.length());
+  const char* p = in.c_str();
+  while (*p) {
+    unsigned char c = (unsigned char)*p;
+    if (c < 0x80u) {
+      out += static_cast<char>(c);
+      ++p;
+      continue;
+    }
+
+    int skip = 1;
+    if ((c >> 5) == 6) skip = 2;
+    else if ((c >> 4) == 14) skip = 3;
+    else if ((c >> 3) == 30) skip = 4;
+
+    if (skip == 2 && p[1]) {
+      unsigned char c2 = (unsigned char)p[1];
+      char rep = 0;
+      if (c == 0xC3) {
+        if (c2 == 0xA7) rep = 'c';
+        else if (c2 == 0x87) rep = 'C';
+        else if (c2 == 0xB6) rep = 'o';
+        else if (c2 == 0x96) rep = 'O';
+        else if (c2 == 0xBC) rep = 'u';
+        else if (c2 == 0x9C) rep = 'U';
+      } else if (c == 0xC4) {
+        if (c2 == 0x9F) rep = 'g';
+        else if (c2 == 0x9E) rep = 'G';
+        else if (c2 == 0xB1) rep = 'i';
+        else if (c2 == 0xB0) rep = 'I';
+      } else if (c == 0xC5) {
+        if (c2 == 0x9F) rep = 's';
+        else if (c2 == 0x9E) rep = 'S';
+      }
+      if (rep != 0) {
+        out += rep;
+        p += 2;
+        continue;
+      }
+      p += 2;
+      continue;
+    }
+    if (skip == 3 && p[1] && p[2]) {
+      p += 3;
+      continue;
+    }
+    if (skip == 4 && p[1] && p[2] && p[3]) {
+      p += 4;
+      continue;
+    }
+    ++p;
+  }
+  return out;
+}
+
 static void handleRoot() {
   String accent = prefs.getString("accent", "cyan");
   String bg     = prefs.getString("bg", "slate");
@@ -155,7 +215,7 @@ static void handleRoot() {
   page += "<textarea name='notes' maxlength='700'>";
   page += htmlEscape(notesText);
   page += "</textarea>";
-  page += "<div class='muted'>Saved notes show up right away.</div>";
+  page += "<div class='muted'>Saved notes show up right away. Turkish letters are saved as plain ASCII for the display (c g i o s u).</div>";
   page += "</div></div>";
 
   page += "<div class='panel' data-panel='theme'>";
@@ -333,6 +393,10 @@ static void handleSave() {
 
   float newLat = server.hasArg("lat") ? server.arg("lat").toFloat() : LAT;
   float newLng = server.hasArg("lng") ? server.arg("lng").toFloat() : LNG;
+
+  newNotes = asciiFoldTurkishUtf8ToAscii(newNotes);
+  newLoc = asciiFoldTurkishUtf8ToAscii(newLoc);
+  newNickname = asciiFoldTurkishUtf8ToAscii(newNickname);
 
   newNotes.trim();
   newLoc.trim();
