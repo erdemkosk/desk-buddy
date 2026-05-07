@@ -1,6 +1,7 @@
 /**
- * ntfy.sh JSON poll — uzaktan parlaklik + ana sayfa slot maskesi.
- * Kisa HTTP timeout (bloklu sure sinirli). Cizim dongusune HTTP koymayin.
+ * ntfy.sh JSON poll — parlaklik + slot maskesi.
+ * HTTP TLS ana loop'ta bloklamasin diye Worker gorev (Core 0) + kuyruk;
+ * tft / uyku fonksiyonlari sadece loop'ta Execute edilir.
  */
 
 #include <Arduino.h>
@@ -11,6 +12,9 @@
 #include <ArduinoJson.h>
 #include <cstring>
 #include <TFT_eSPI.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
 
 #include "Deskbuddy_config.h"
 #include "Deskbuddy_types.h"
@@ -31,7 +35,6 @@ extern void restoreSleepAwareBacklight();
 extern void setBacklight(int value);
 extern void touchResetGate();
 
-/** Sketch ile ayni parlaklik seviyesi (BL_DIM). */
 static constexpr uint8_t kBlDimLvl = 18;
 
 uint8_t deskRemoteHideSlotBits = 0;
@@ -46,6 +49,23 @@ struct RevertSnap {
   uint8_t hides = 0;
 };
 static RevertSnap revert;
+
+struct NtfJob {
+  char id[96];
+  char tail[96];
+};
+
+static QueueHandle_t sNtfQueue = nullptr;
+static TaskHandle_t sNtfWorker = nullptr;
+
+static void copyCStr(char* dst, size_t cap, const char* src) {
+  if (!src || cap == 0) {
+    if (cap) dst[0] = '\0';
+    return;
+  }
+  strncpy(dst, src, cap - 1);
+  dst[cap - 1] = '\0';
+}
 
 static String mergedTokenValue() {
   String tok = prefs.getString("ntTok", "");
@@ -70,7 +90,6 @@ static bool bodyTokenMatches(const String& body) {
   return first.length() != 0 && first == want;
 }
 
-/** Title = DESK:TAIL ; TAIL orijinal (SLOT_HIDE desenleri buyuk kullanilir). */
 static bool extractDeskTail(const JsonDocument& msg, String& tail) {
   const char* tp = msg["title"];
   if (!tp) return false;
@@ -109,7 +128,7 @@ static void revertApplyNow() {
   pageDirty = true;
 }
 
-/** false = kotu format / tannimadi (id yakilmaz callers'ta mantik ile). true = islendi/islem denendi bilinen */
+/** Yalnizca ana dongu tarafından cagrilmalidir */
 static bool executeDeskTail(const String& tailRaw) {
   String tu = tailRaw;
   tu.trim();
@@ -184,62 +203,98 @@ static bool executeDeskTail(const String& tailRaw) {
   return false;
 }
 
-void deskNtfyPollIfDue() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  /** Token atanmamis: guvenlik (komut ve HTTP yok). */
-  if (!mergedTokenValue().length()) return;
+/** Core 0: bloklu HTTP ancak tft dokunulmuyor */
+static void ntfyWorkerTask(void* /*param*/) {
+  TickType_t period = pdMS_TO_TICKS(DESKBUDDY_NTFY_POLL_MS);
+  if (period < pdMS_TO_TICKS(12000)) period = pdMS_TO_TICKS(12000);
 
-  static unsigned long lastPollMs = 0;
-  unsigned long interval = DESKBUDDY_NTFY_POLL_MS;
-  if (interval < 12000UL) interval = 12000UL;
-  unsigned long now = millis();
-  if (lastPollMs != 0 && now - lastPollMs < interval) return;
-  lastPollMs = now;
+  for (;;) {
+    vTaskDelay(period);
 
-  String url = String("https://ntfy.sh/") + String(DESKBUDDY_NTFY_TOPIC) +
-               "/json?since=" + String(DESKBUDDY_NTFY_SINCE_WINDOW);
+    if (WiFi.status() != WL_CONNECTED) continue;
+    if (!mergedTokenValue().length()) continue;
 
-  WiFiClientSecure cli;
-  cli.setInsecure();
-  cli.setTimeout(DESKBUDDY_NTFY_HTTP_MS);
+    String url = String("https://ntfy.sh/") + String(DESKBUDDY_NTFY_TOPIC) +
+                 "/json?since=" + String(DESKBUDDY_NTFY_SINCE_WINDOW);
 
-  HTTPClient http;
-  http.setTimeout((int)DESKBUDDY_NTFY_HTTP_MS);
+    WiFiClientSecure cli;
+    cli.setInsecure();
+    cli.setTimeout(DESKBUDDY_NTFY_HTTP_MS);
 
-  if (!http.begin(cli, url)) return;
+    HTTPClient http;
+    http.setTimeout((int)DESKBUDDY_NTFY_HTTP_MS);
+    if (!http.begin(cli, url)) continue;
 
-  int code = http.GET();
-  String body = (code == HTTP_CODE_OK) ? http.getString() : String();
-  http.end();
+    int code = http.GET();
+    String body = (code == HTTP_CODE_OK) ? http.getString() : String();
+    http.end();
 
-  if (body.length() == 0 || body.length() > 16384U) return;
+    if (body.length() == 0 || body.length() > 16384U) continue;
 
-  int ls = 0;
-  while (ls < (int)body.length()) {
-    int nl = body.indexOf('\n', ls);
-    if (nl < 0) nl = body.length();
+    int ls = 0;
+    while (ls < (int)body.length()) {
+      int nl = body.indexOf('\n', ls);
+      if (nl < 0) nl = body.length();
 
-    String line = body.substring(ls, nl);
-    line.trim();
-    ls = nl + 1;
+      String line = body.substring(ls, nl);
+      line.trim();
+      ls = nl + 1;
 
-    StaticJsonDocument<768> msg;
-    if (deserializeJson(msg, line)) continue;
+      StaticJsonDocument<768> msg;
+      if (deserializeJson(msg, line)) continue;
 
-    if (strcasecmp(msg["event"] | "", "message") != 0) continue;
+      if (strcasecmp(msg["event"] | "", "message") != 0) continue;
 
-    const char* cid = msg["id"] | "";
-    if (!cid || cid[0] == '\0') continue;
+      const char* cid = msg["id"] | "";
+      if (!cid || cid[0] == '\0') continue;
 
+      /** Id NVS'e worker yazmiyoruz; yeniden POLL'da bosuna islem yapilmasin diye atlama okuma */
+      {
+        String lastHandled = prefs.getString(kNvsLastId, "");
+        if (lastHandled.length() && lastHandled.equals(cid)) continue;
+      }
+
+      if (!bodyTokenMatches(String(msg["message"] | ""))) continue;
+
+      String tail;
+      if (!extractDeskTail(msg, tail)) continue;
+
+      NtfJob job{};
+      copyCStr(job.id, sizeof(job.id), cid);
+      tail.toCharArray(job.tail, sizeof(job.tail));
+
+      if (sNtfQueue)
+        xQueueSend(sNtfQueue, &job, 0);  /** Kuyruk doluysa atlama Donma yok */
+    }
+  }
+}
+
+void deskNtfyApplyQueued() {
+  if (!sNtfQueue) return;
+
+  NtfJob job;
+  while (xQueueReceive(sNtfQueue, &job, 0) == pdTRUE) {
     String lastHandled = prefs.getString(kNvsLastId, "");
-    if (lastHandled.length() && lastHandled.equals(cid)) continue;
+    if (lastHandled.length() && lastHandled.equals(job.id)) continue;
+    /** Token kopmus olabilir; uygulama */
+    if (!mergedTokenValue().length()) {
+      prefs.putString(kNvsLastId, job.id);
+      continue;
+    }
 
-    if (!bodyTokenMatches(String(msg["message"] | ""))) continue;
+    (void)executeDeskTail(String(job.tail));
+    prefs.putString(kNvsLastId, job.id);
+  }
+}
 
-    String tail;
-    if (!extractDeskTail(msg, tail)) continue;
+void deskNtfyInit() {
+  if (sNtfQueue != nullptr) return;
 
-    (void)executeDeskTail(tail);
-    prefs.putString(kNvsLastId, cid);
+  sNtfQueue = xQueueCreate(16, sizeof(NtfJob));
+  if (!sNtfQueue) return;
+
+  if (xTaskCreatePinnedToCore(ntfyWorkerTask, "deskNtfy", 14336, nullptr, tskIDLE_PRIORITY, &sNtfWorker, 0) != pdPASS) {
+    sNtfWorker = nullptr;
+    return;
   }
 }

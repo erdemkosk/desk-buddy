@@ -2969,6 +2969,7 @@ void setup() {
   ensureFinance();
 
   setupWebServer();
+  deskNtfyInit();
 
   pageDirty = true;
   dataDirty = true;
@@ -2990,7 +2991,7 @@ void loop() {
   updateFocusTimerState();
   updateTimerDoneDialogState();
   handleAutoSleep();
-  deskNtfyPollIfDue();
+  deskNtfyApplyQueued();
 
   int tx = 0, ty = 0;
   if (touchNewPress(tx, ty)) {
