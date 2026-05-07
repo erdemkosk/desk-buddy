@@ -3576,7 +3576,6 @@ void updateWiFiConnectionState() {
     ensureWeather();
     ensureKpIndex();
     ensureFinance();
-    ensureCalendar();
     dataDirty = true;
     pageDirty = true;
     return;
@@ -3785,7 +3784,6 @@ void loop() {
     ensureWeather();
     ensureKpIndex();
     ensureFinance();
-    ensureCalendar();
   }
 
   if (millis() - lastClockTick >= CLOCK_TICK_MS) {
