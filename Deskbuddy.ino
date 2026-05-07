@@ -298,7 +298,7 @@ String ntfyPopupBodyStr;
 unsigned long ntfyPopupUntilMs = 0;
 
 const unsigned long NTFY_POLL_INTERVAL_MS = 28000UL;
-const unsigned long NTFY_POPUP_VISIBLE_MS = 5000UL;
+const unsigned long NTFY_POPUP_VISIBLE_MS = 4000UL;
 static unsigned long lastNtfyPollMs = 0;
 static String cacheNtfyPopupComb = "";
 const unsigned long TIMER_DONE_DIALOG_MS = 60UL * 1000UL;
@@ -1528,6 +1528,109 @@ bool handleWifiForgetConfirmTouch(int x, int y) {
   return true;
 }
 
+/** ntfy metnini TFT fontuyla okunabilir yap: Türkçe UTF-8 -> ASCII yaklasigi, geri kalan cok baytli UTF-8 -> '?' */
+static String ntfyAsciiFold(const String& s) {
+  String out;
+  if (!s.length()) return out;
+  out.reserve(s.length());
+
+  auto appendAscii = [&](char c) {
+    if ((unsigned char)c >= 32u && (unsigned char)c != 127u) out += c;
+    else if (c == ' ' || c == '\t') out += ' ';
+  };
+
+  const char* p = s.c_str();
+  size_t len = (size_t)s.length();
+
+  for (size_t i = 0; i < len;) {
+    unsigned char b = (unsigned char)p[i];
+
+    if (b < 0x80u) {
+      if (b == '\n' || b == '\r' || b == '\t') {
+        if (out.length() == 0 || out[out.length() - 1] != ' ') out += ' ';
+      } else
+        appendAscii((char)b);
+      i++;
+      continue;
+    }
+
+    if ((b & 0xE0u) == 0xC0u && i + 1 < len) {
+      unsigned char b2 = (unsigned char)p[i + 1];
+      char rep = '?';
+
+      if (b == 0xC3u) {
+        switch (b2) {
+          case 0xA7u:
+            rep = 'c';
+            break;                                       // ç
+          case 0x87u:
+            rep = 'C';
+            break;                                       // Ç
+          case 0xB6u:
+            rep = 'o';
+            break;                                       // ö
+          case 0x96u:
+            rep = 'O';
+            break;                                       // Ö
+          case 0xBCu:
+            rep = 'u';
+            break;                                       // ü
+          case 0x9Cu:
+            rep = 'U';
+            break;                                       // Ü
+          case 0x91u:
+            rep = 'N';
+            break;                                       // Ñ
+          case 0xB1u:
+            rep = 'n';
+            break;                                       // ñ
+          default:
+            if (b2 == 0xA9u || b2 == 0xAAu || b2 == 0xABu || b2 == 0xA8u)
+              rep = 'e';                                 // èéêë
+            else
+              rep = '?';
+            break;
+        }
+      } else if (b == 0xC4u) {
+        if (b2 == 0x9Fu)
+          rep = 'g';                                     // ğ
+        else if (b2 == 0x9Eu)
+          rep = 'G';                                     // Ğ
+        else if (b2 == 0xB1u)
+          rep = 'i';                                     // ı
+        else if (b2 == 0xB0u)
+          rep = 'I';                                     // İ
+      } else if (b == 0xC5u) {
+        if (b2 == 0x9Fu)
+          rep = 's';                                     // ş
+        else if (b2 == 0x9Eu)
+          rep = 'S';                                     // Ş
+      }
+
+      appendAscii(rep);
+      i += 2;
+      continue;
+    }
+
+    if ((b & 0xF0u) == 0xE0u && i + 2 < len) {
+      out += '?';
+      i += 3;
+      continue;
+    }
+    if ((b & 0xF8u) == 0xF0u && i + 3 < len) {
+      out += '?';
+      i += 4;
+      continue;
+    }
+    out += '?';
+    i++;
+  }
+
+  while (out.length() > 1 && out.endsWith(" ")) out.remove(out.length() - 1);
+  out.trim();
+  return out;
+}
+
 void dismissNtfyPopup() {
   if (!ntfyPopupOpen) return;
   ntfyPopupOpen = false;
@@ -1535,6 +1638,7 @@ void dismissNtfyPopup() {
   ntfyPopupBodyStr = "";
   ntfyPopupUntilMs = 0;
   cacheNtfyPopupComb = "";
+  touchResetGate();
   pageDirty = true;
 }
 
@@ -1657,6 +1761,9 @@ void pollNtfyIfDue() {
     const char* ev = jd["event"];
     if (!ev || strcmp(ev, "message") != 0) continue;
 
+    const char* idMsg = jd["id"];
+    if (!idMsg || strlen(idMsg) == 0) continue;
+
     const char* titleRaw = jd["title"];
     const char* msgRaw = jd["message"];
 
@@ -1672,6 +1779,8 @@ void pollNtfyIfDue() {
 
   if (scanAll || !haveMessageEvent || candBody.length() == 0) return;
 
+  candTitle = ntfyAsciiFold(candTitle);
+  candBody = ntfyAsciiFold(candBody);
   if (candTitle.length() > 36) candTitle = candTitle.substring(0, 36);
   if (candBody.length() > 320) candBody = candBody.substring(0, 320);
 
@@ -3144,55 +3253,54 @@ void loop() {
   if (touchNewPress(tx, ty)) {
     lastInteractionMs = millis();
 
-    if (sleepOff) {
-      if (manualDimMode) {
-        sleepOff = false;
-        sleepDimmed = true;
-        setBacklight(BL_DIM);
-        pageDirty = true;
-        touchResetGate();
-      } else {
-        wakeDisplay(true);
-      }
-      return;
-    }
-
-    if (handleWifiForgetConfirmTouch(tx, ty)) {
-      return;
-    }
-
     if (ntfyPopupOpen) {
       dismissNtfyPopup();
-      return;
-    }
-
-    if (handleTimerDoneDialogTouch(tx, ty)) {
-      return;
-    }
-
-    const int bxWifi = topBarWifiForgetBtnX();
-    const int bxDim = topBarDimBtnX();
-    const int bxMoon = topBarMoonBtnX();
-    const int bs = TOPBAR_BTN_SZ;
-    if (ty <= TOPBAR_H && ty >= 0) {
-      if (tx >= bxMoon && tx < bxMoon + bs)
-        enterManualSleepFull();
-      else if (tx >= bxDim && tx < bxDim + bs)
-        toggleManualDimBar();
-      else if (tx >= bxWifi && tx < bxWifi + bs)
-        openWifiForgetConfirm();
     } else {
-      if (sleepDimmed) {
-        if (!manualDimMode) {
+      if (sleepOff) {
+        if (manualDimMode) {
+          sleepOff = false;
+          sleepDimmed = true;
+          setBacklight(BL_DIM);
+          pageDirty = true;
+          touchResetGate();
+        } else {
           wakeDisplay(true);
+        }
+        return;
+      }
+
+      if (handleWifiForgetConfirmTouch(tx, ty)) {
+        return;
+      }
+
+      if (handleTimerDoneDialogTouch(tx, ty)) {
+        return;
+      }
+
+      const int bxWifi = topBarWifiForgetBtnX();
+      const int bxDim = topBarDimBtnX();
+      const int bxMoon = topBarMoonBtnX();
+      const int bs = TOPBAR_BTN_SZ;
+      if (ty <= TOPBAR_H && ty >= 0) {
+        if (tx >= bxMoon && tx < bxMoon + bs)
+          enterManualSleepFull();
+        else if (tx >= bxDim && tx < bxDim + bs)
+          toggleManualDimBar();
+        else if (tx >= bxWifi && tx < bxWifi + bs)
+          openWifiForgetConfirm();
+      } else {
+        if (sleepDimmed) {
+          if (!manualDimMode) {
+            wakeDisplay(true);
+          } else {
+            if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
+              handleNavTouch(tx, ty);
+            }
+          }
         } else {
           if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
             handleNavTouch(tx, ty);
           }
-        }
-      } else {
-        if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
-          handleNavTouch(tx, ty);
         }
       }
     }
@@ -3206,16 +3314,17 @@ void loop() {
     ensureFinance();
   }
 
-  if (millis() - lastClockTick >= CLOCK_TICK_MS) {
-    lastClockTick = millis();
-    updateCurrentPageDynamic();
-    dataDirty = false;
-  }
-
+  /** Tam yenileme incremental saatten once: fullscreen overlay kapandiginda yari ekranda kalmasin. */
   if (pageDirty || lastDrawnPage != currentPage) {
     drawCurrentPageFull();
     updateCurrentPageDynamic();
     pageDirty = false;
+    dataDirty = false;
+  }
+
+  if (millis() - lastClockTick >= CLOCK_TICK_MS) {
+    lastClockTick = millis();
+    updateCurrentPageDynamic();
     dataDirty = false;
   }
 
