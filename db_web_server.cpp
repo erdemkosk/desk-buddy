@@ -72,7 +72,6 @@ static void handleRoot() {
   String region = prefs.getString("region", "europe");
   String nickname = prefs.getString("nickname", "");
   bool flashMode = prefs.getBool("flashMode", false);
-  String ntfyTopic = prefs.getString("ntfyTopic", NTFY_DEFAULT_TOPIC);
   String homeSlotKeys[HOME_SLOT_COUNT];
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     homeSlotKeys[i] = prefs.getString((String("homeSlot") + String(i)).c_str(), homeWidgetKey(homeWidgetSlots[i]));
@@ -257,19 +256,6 @@ static void handleRoot() {
   page += "<div><label class='label'>Latitude</label><input name='lat' value='" + String(LAT, 6) + "'></div>";
   page += "<div><label class='label'>Longitude</label><input name='lng' value='" + String(LNG, 6) + "'></div>";
   page += "</div><div class='footer-note'>Example Berlin: latitude 52.5200, longitude 13.4050.</div></div>";
-
-  page += "<div class='settings-block'><span class='settings-title'>ntfy (push alerts)</span>";
-  page += "<div class='settings-desc'>Topic on ntfy.sh polled by the device. Use a unique name; public topics can "
-    "be subscribed by anyone.</div>";
-  page += "<div><label class='label'>Topic</label><input name='ntfyTopic' maxlength='48' placeholder='";
-  page += String(NTFY_DEFAULT_TOPIC);
-  page += "' value='";
-  page += htmlEscape(ntfyTopic);
-  page +=
-    "' autocapitalize='none' autocomplete='off' spellcheck='false'></div>";
-  page +=
-    "<div class='footer-note' style='margin-top:10px'>Empty = disable polling. Changing topic resets the read cursor.</div></div>";
-
   page += "</div></div>";
 
   page += "<div class='panel' data-panel='widgets'>";
@@ -352,19 +338,6 @@ static void handleSave() {
   newLoc.trim();
   newNickname.trim();
 
-  String prevNtfyTopic = prefs.getString("ntfyTopic", String(NTFY_DEFAULT_TOPIC));
-  String newNtfyRaw = server.hasArg("ntfyTopic") ? server.arg("ntfyTopic") : prevNtfyTopic;
-  newNtfyRaw.trim();
-  String newNtfyTopic;
-  for (size_t i = 0; i < newNtfyRaw.length(); i++) {
-    char c = newNtfyRaw[i];
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
-      if (newNtfyTopic.length() >= 48) break;
-      newNtfyTopic += c;
-    }
-  }
-  if (newNtfyTopic != prevNtfyTopic) prefs.remove("ntfyLastId");
-
   if (newNotes.length() == 0) newNotes = "Henuz not yok.";
   if (newNotes.length() > 700) newNotes = newNotes.substring(0, 700);
   if (newLoc.length() == 0) newLoc = "Unknown";
@@ -408,7 +381,6 @@ static void handleSave() {
   prefs.putString("region", regionFormatKey);
   prefs.putString("nickname", buddyNickname);
   prefs.putString("locname", locationName);
-  prefs.putString("ntfyTopic", newNtfyTopic);
   prefs.putFloat("lat", LAT);
   prefs.putFloat("lng", LNG);
   prefs.putInt("sleepMin", sleepIntervalMin);

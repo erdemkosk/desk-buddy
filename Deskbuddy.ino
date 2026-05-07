@@ -11,6 +11,7 @@
 // - Uptime added to Status page
 // - Wi-Fi: NVS keys wifiSsid / wifiPass; first boot opens AP + WIFI: QR (telefon ile ag katilimi) + 192.168.4.1
 // - Ust bar wifi unut: NVS sil, onay (Evet/Hayir) sonra kurulum AP
+// - Uzaktan ntfy (topic + paylasilan token): DESK: komutu + mesaj ilk satiri = token — HTTP poll, ekranda kitlenmez
 
 // Arduino: otomatik fonksiyon prototipleri son #include'dan sonra eklenir;
 // parametre tipleri (HomeWidgetType, WxKind) include'lardan once tanimlanir.
@@ -34,6 +35,7 @@
 #include "Deskbuddy_layout.h"
 #include "db_wifi_provision.h"
 #include "db_web_server.h"
+#include "db_ntfy_remote.h"
 
 // =========================================================
 // DISPLAY / TOUCH
@@ -290,16 +292,6 @@ bool timerDoneDialogOpen = false;
 unsigned long timerDoneDialogStartedMs = 0;
 /** Wi-Fi NVS kaydini silmeden once onay kutusu */
 bool wifiForgetConfirmOpen = false;
-
-/** ntfy.sh JSON poll bildirimi (Wi‑Fi unut kutusuyla ayni kart boyutu) */
-bool ntfyPopupOpen = false;
-String ntfyPopupTitleStr;
-String ntfyPopupBodyStr;
-unsigned long ntfyPopupUntilMs = 0;
-
-const unsigned long NTFY_POPUP_VISIBLE_MS = 4000UL;
-static unsigned long lastNtfyPollMs = 0;
-static String cacheNtfyPopupComb = "";
 const unsigned long TIMER_DONE_DIALOG_MS = 60UL * 1000UL;
 bool flashModeEnabled = false;
 int timerPresetMin[6] = {1, 5, 10, 15, 25, 30};
@@ -872,7 +864,6 @@ void wakeDisplay(bool clearManualMode) {
   setBacklight(BL_FULL);
   pageDirty = true;
   touchResetGate();
-  lastNtfyPollMs = 0;
 }
 
 void enterSleepDim() {
@@ -915,7 +906,7 @@ void enterManualSleepFull() {
 
 
 void handleAutoSleep() {
-  if (focusMenuOpen || timerDoneDialogOpen || wifiForgetConfirmOpen || ntfyPopupOpen) return;
+  if (focusMenuOpen || timerDoneDialogOpen || wifiForgetConfirmOpen) return;
   if (sleepIntervalMin <= 0) return;
 
   unsigned long now = millis();
@@ -1526,280 +1517,6 @@ bool handleWifiForgetConfirmTouch(int x, int y) {
 
   dismissWifiForgetConfirm();
   return true;
-}
-
-/** ntfy metnini TFT fontuyla okunabilir yap: Türkçe UTF-8 -> ASCII yaklasigi, geri kalan cok baytli UTF-8 -> '?' */
-static String ntfyAsciiFold(const String& s) {
-  String out;
-  if (!s.length()) return out;
-  out.reserve(s.length());
-
-  auto appendAscii = [&](char c) {
-    if ((unsigned char)c >= 32u && (unsigned char)c != 127u) out += c;
-    else if (c == ' ' || c == '\t') out += ' ';
-  };
-
-  const char* p = s.c_str();
-  size_t len = (size_t)s.length();
-
-  for (size_t i = 0; i < len;) {
-    unsigned char b = (unsigned char)p[i];
-
-    if (b < 0x80u) {
-      if (b == '\n' || b == '\r' || b == '\t') {
-        if (out.length() == 0 || out[out.length() - 1] != ' ') out += ' ';
-      } else
-        appendAscii((char)b);
-      i++;
-      continue;
-    }
-
-    if ((b & 0xE0u) == 0xC0u && i + 1 < len) {
-      unsigned char b2 = (unsigned char)p[i + 1];
-      char rep = '?';
-
-      if (b == 0xC3u) {
-        switch (b2) {
-          case 0xA7u:
-            rep = 'c';
-            break;                                       // ç
-          case 0x87u:
-            rep = 'C';
-            break;                                       // Ç
-          case 0xB6u:
-            rep = 'o';
-            break;                                       // ö
-          case 0x96u:
-            rep = 'O';
-            break;                                       // Ö
-          case 0xBCu:
-            rep = 'u';
-            break;                                       // ü
-          case 0x9Cu:
-            rep = 'U';
-            break;                                       // Ü
-          case 0x91u:
-            rep = 'N';
-            break;                                       // Ñ
-          case 0xB1u:
-            rep = 'n';
-            break;                                       // ñ
-          default:
-            if (b2 == 0xA9u || b2 == 0xAAu || b2 == 0xABu || b2 == 0xA8u)
-              rep = 'e';                                 // èéêë
-            else
-              rep = '?';
-            break;
-        }
-      } else if (b == 0xC4u) {
-        if (b2 == 0x9Fu)
-          rep = 'g';                                     // ğ
-        else if (b2 == 0x9Eu)
-          rep = 'G';                                     // Ğ
-        else if (b2 == 0xB1u)
-          rep = 'i';                                     // ı
-        else if (b2 == 0xB0u)
-          rep = 'I';                                     // İ
-      } else if (b == 0xC5u) {
-        if (b2 == 0x9Fu)
-          rep = 's';                                     // ş
-        else if (b2 == 0x9Eu)
-          rep = 'S';                                     // Ş
-      }
-
-      appendAscii(rep);
-      i += 2;
-      continue;
-    }
-
-    if ((b & 0xF0u) == 0xE0u && i + 2 < len) {
-      out += '?';
-      i += 3;
-      continue;
-    }
-    if ((b & 0xF8u) == 0xF0u && i + 3 < len) {
-      out += '?';
-      i += 4;
-      continue;
-    }
-    out += '?';
-    i++;
-  }
-
-  while (out.length() > 1 && out.endsWith(" ")) out.remove(out.length() - 1);
-  out.trim();
-  return out;
-}
-
-void dismissNtfyPopup() {
-  if (!ntfyPopupOpen) return;
-  ntfyPopupOpen = false;
-  ntfyPopupTitleStr = "";
-  ntfyPopupBodyStr = "";
-  ntfyPopupUntilMs = 0;
-  cacheNtfyPopupComb = "";
-  touchResetGate();
-  pageDirty = true;
-}
-
-void updateNtfyPopupExpiry() {
-  if (!ntfyPopupOpen) return;
-  if ((long)(millis() - ntfyPopupUntilMs) >= 0) dismissNtfyPopup();
-}
-
-/** Mesaji kutuya sigdir; font 1, ~26 karakter satir */
-static String ntfyTakeLineBreak(String& rest, size_t cols) {
-  rest.trim();
-  if (rest.length() == 0) return "";
-  size_t cut = cols;
-  if (rest.length() > cols) {
-    int sp = rest.lastIndexOf(' ', cols);
-    if (sp > 10) cut = (size_t)sp;
-    else cut = cols;
-  }
-  String ln = rest.substring(0, cut);
-  rest = rest.substring(cut < rest.length() ? cut : rest.length());
-  rest.trim();
-  return ln;
-}
-
-void drawNtfyPopupOverlay(bool force = false) {
-  if (!ntfyPopupOpen) return;
-
-  const String combined = ntfyPopupTitleStr + "|" + ntfyPopupBodyStr + "|" + String(COL_PANEL_ALT) + "|" +
-                          String(COL_ACCENT) + "|" + String(COL_TEXT);
-  if (!force && combined == cacheNtfyPopupComb) return;
-  cacheNtfyPopupComb = combined;
-
-  const int cx = WIFI_FORGET_DLG_X + WIFI_FORGET_DLG_W / 2;
-
-  tft.fillScreen(COL_BG);
-  tft.fillRoundRect(WIFI_FORGET_DLG_X, WIFI_FORGET_DLG_Y, WIFI_FORGET_DLG_W, WIFI_FORGET_DLG_H, 12, COL_PANEL_ALT);
-  tft.drawRoundRect(WIFI_FORGET_DLG_X, WIFI_FORGET_DLG_Y, WIFI_FORGET_DLG_W, WIFI_FORGET_DLG_H, 12, COL_ACCENT);
-
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
-  tft.drawString(ntfyPopupTitleStr.length() ? ntfyPopupTitleStr.c_str() : "ntfy", cx, WIFI_FORGET_DLG_Y + 24, 2);
-
-  tft.setTextColor(COL_DIM, COL_PANEL_ALT);
-  String rest = ntfyPopupBodyStr;
-  int y = WIFI_FORGET_DLG_Y + 52;
-  for (int ln = 0; ln < 5 && rest.length(); ln++) {
-    String row = ntfyTakeLineBreak(rest, 26);
-    if (row.length()) tft.drawString(row, cx, y, 1);
-    y += 14;
-  }
-
-  tft.drawString("Dokun veya otomatik kapanir.", cx, WIFI_FORGET_DLG_Y + WIFI_FORGET_DLG_H - 18, 1);
-  tft.setTextDatum(TL_DATUM);
-}
-
-void pollNtfyIfDue() {
-  if (!wifiEnabled || WiFi.status() != WL_CONNECTED) return;
-  if (wifiForgetConfirmOpen || timerDoneDialogOpen || ntfyPopupOpen || focusMenuOpen) return;
-
-  unsigned long now = millis();
-  if ((now - lastNtfyPollMs) < NTFY_POLL_INTERVAL_MS) return;
-  lastNtfyPollMs = now;
-
-  String topic = prefs.getString("ntfyTopic", NTFY_DEFAULT_TOPIC);
-  topic.trim();
-  if (topic.length() == 0) return;
-
-  String lastIdPersisted = prefs.getString("ntfyLastId", "");
-  const bool scanAll = (lastIdPersisted.length() == 0);
-
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(12000);
-
-  /* poll=1: bağlantı tüm bekleyen satırlar okununca KAPANır. poll yoksa abonelik açık kalır;
-   * ESP'de bağlantı/önbellek tekrarı = aynı mesajlar tekrar görünebilir. */
-  String url = String("https://ntfy.sh/") + topic + "/json?poll=1";
-  if (scanAll)
-    url += "&since=all";
-  else
-    url += "&since=" + lastIdPersisted;
-
-  HTTPClient http;
-  http.setTimeout(12000);
-  if (!http.begin(client, url)) return;
-
-  int code = http.GET();
-  if (code != 200) {
-    http.end();
-    return;
-  }
-
-  WiFiClient& stream = http.getStream();
-
-  String lastIdSeen = lastIdPersisted;
-  String candTitle = "ntfy";
-  String candBody;
-  bool haveMessageEvent = false;
-  /* since=all ilk senkonda çok satır gelebilir; lineCap koparma imleci yarıda bırakıp sonra tekrar mesaj çıkarır. */
-  unsigned long watchdog = millis() + (scanAll ? 55000UL : 25000UL);
-  const int lineCapScanAll = 4000;
-  const int lineCapNormal = 400;
-  int lineCap = 0;
-
-  for (;;) {
-    if (millis() > watchdog || lineCap >= (scanAll ? lineCapScanAll : lineCapNormal)) break;
-    if (!stream.available()) {
-      if (!http.connected()) break;
-      yield();
-      delay(2);
-      if (!stream.available() && !http.connected()) break;
-      continue;
-    }
-
-    String line = stream.readStringUntil('\n');
-    line.trim();
-    lineCap++;
-    if (line.length() == 0) continue;
-
-    StaticJsonDocument<900> jd;
-    if (deserializeJson(jd, line)) continue;
-
-    const char* idRaw = jd["id"];
-    if (idRaw && strlen(idRaw)) lastIdSeen = String(idRaw);
-
-    if (scanAll) continue;
-
-    const char* ev = jd["event"];
-    if (!ev || strcmp(ev, "message") != 0) continue;
-
-    const char* idMsg = jd["id"];
-    if (!idMsg || strlen(idMsg) == 0) continue;
-
-    const char* titleRaw = jd["title"];
-    const char* msgRaw = jd["message"];
-
-    candTitle = (titleRaw && strlen(titleRaw)) ? String(titleRaw) : String("ntfy");
-    if (msgRaw && strlen(msgRaw)) candBody = String(msgRaw);
-    else candBody = (titleRaw && strlen(titleRaw)) ? String(titleRaw) : String("");
-
-    if (candBody.length() > 0) haveMessageEvent = true;
-  }
-  http.end();
-
-  if (lastIdSeen.length() > 0) prefs.putString("ntfyLastId", lastIdSeen);
-
-  if (scanAll || !haveMessageEvent || candBody.length() == 0) return;
-
-  candTitle = ntfyAsciiFold(candTitle);
-  candBody = ntfyAsciiFold(candBody);
-  if (candTitle.length() > 36) candTitle = candTitle.substring(0, 36);
-  if (candBody.length() > 320) candBody = candBody.substring(0, 320);
-
-  ntfyPopupTitleStr = candTitle;
-  ntfyPopupBodyStr = candBody;
-  ntfyPopupUntilMs = millis() + NTFY_POPUP_VISIBLE_MS;
-  ntfyPopupOpen = true;
-  wakeDisplay(false);
-  lastInteractionMs = millis();
-  cacheNtfyPopupComb = "";
-  pageDirty = true;
 }
 
 void drawTopBar(const String& title) {
@@ -2542,36 +2259,60 @@ void drawHomeSlotWidget(int slot, bool force = false) {
   int x, y, w, h;
   getHomeSlotRect(slot, x, y, w, h);
 
+  static const String hidTag("!hid");
+  bool forceDraw = force;
+  if ((((deskRemoteHideSlotBits >> slot) & 1) == 0) && cacheHomeSlots[slot] == hidTag) {
+    cacheHomeSlots[slot] = "";
+    forceDraw = true;
+  }
+
+  if (((deskRemoteHideSlotBits >> slot) & 1) != 0) {
+    if (!forceDraw && cacheHomeSlots[slot] == hidTag) return;
+    tft.fillRoundRect(x, y, w, h, 10, COL_PANEL);
+    tft.drawRoundRect(x, y, w, h, 10, COL_STROKE);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(COL_DIM, COL_PANEL);
+    tft.drawString("Uzaktan", x + w / 2, y + h / 2 - 6, 2);
+    tft.drawString("kapali", x + w / 2, y + h / 2 + 10, 1);
+    tft.setTextDatum(TL_DATUM);
+    cacheHomeSlots[slot] = hidTag;
+    return;
+  }
+
   switch (homeWidgetSlots[slot]) {
     case HOME_WIDGET_HUMIDITY:
-      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_HUMIDITY), humidityText(), cacheHomeSlots[slot], force);
+      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_HUMIDITY), humidityText(), cacheHomeSlots[slot],
+                                   forceDraw);
       break;
     case HOME_WIDGET_TIMER:
-      drawFocusTimerWidget(x, y, w, h, cacheHomeSlots[slot], force);
+      drawFocusTimerWidget(x, y, w, h, cacheHomeSlots[slot], forceDraw);
       break;
     case HOME_WIDGET_RAIN:
-      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_RAIN), rainText(), cacheHomeSlots[slot], force);
+      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_RAIN), rainText(), cacheHomeSlots[slot], forceDraw);
       break;
     case HOME_WIDGET_OUTDOOR:
-      drawOutdoorHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+      drawOutdoorHomeWidget(x, y, w, h, cacheHomeSlots[slot], forceDraw);
       break;
     case HOME_WIDGET_KP:
-      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_KP), kpText(), cacheHomeSlots[slot], force, kpLevelText());
+      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_KP), kpText(), cacheHomeSlots[slot], forceDraw,
+                                   kpLevelText());
       break;
     case HOME_WIDGET_UV:
-      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_UV), uvText(), cacheHomeSlots[slot], force, uvLevelText());
+      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_UV), uvText(), cacheHomeSlots[slot], forceDraw,
+                                   uvLevelText());
       break;
     case HOME_WIDGET_WIND:
-      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_WIND), windText(), cacheHomeSlots[slot], force, windDirectionText());
+      drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_WIND), windText(), cacheHomeSlots[slot], forceDraw,
+                                   windDirectionText());
       break;
     case HOME_WIDGET_SUN:
-      drawSunEventWidget(x, y, w, h, cacheHomeSlots[slot], force);
+      drawSunEventWidget(x, y, w, h, cacheHomeSlots[slot], forceDraw);
       break;
     case HOME_WIDGET_FINANCE:
-      drawFinanceHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+      drawFinanceHomeWidget(x, y, w, h, cacheHomeSlots[slot], forceDraw);
       break;
     case HOME_WIDGET_BUDDY:
-      drawBuddyHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+      drawBuddyHomeWidget(x, y, w, h, cacheHomeSlots[slot], forceDraw);
       break;
   }
 }
@@ -2951,18 +2692,12 @@ void drawCurrentPageFull() {
 
   if (focusMenuOpen && currentPage == PAGE_HOME) drawFocusMenuOverlay(true);
   if (timerDoneDialogOpen) drawTimerDoneOverlay(true);
-  if (ntfyPopupOpen) drawNtfyPopupOverlay(true);
   if (wifiForgetConfirmOpen) drawWifiForgetConfirmOverlay(true);
 }
 
 void updateCurrentPageDynamic() {
   if (wifiForgetConfirmOpen) {
     drawWifiForgetConfirmOverlay(false);
-    return;
-  }
-
-  if (ntfyPopupOpen) {
-    drawNtfyPopupOverlay(false);
     return;
   }
 
@@ -3039,6 +2774,7 @@ bool handleHomeTouch(int x, int y) {
   if (focusMenuOpen) return handleFocusMenuTouch(x, y);
 
   for (int slot = 0; slot < HOME_SLOT_COUNT; slot++) {
+    if (((deskRemoteHideSlotBits >> slot) & 1) != 0) continue;
     if (homeWidgetSlots[slot] != HOME_WIDGET_TIMER) continue;
 
     int slotX, slotY, slotW, slotH;
@@ -3253,67 +2989,61 @@ void loop() {
   updateWiFiConnectionState();
   updateFocusTimerState();
   updateTimerDoneDialogState();
-  updateNtfyPopupExpiry();
   handleAutoSleep();
+  deskNtfyPollIfDue();
 
   int tx = 0, ty = 0;
   if (touchNewPress(tx, ty)) {
     lastInteractionMs = millis();
 
-    if (ntfyPopupOpen) {
-      dismissNtfyPopup();
-    } else {
-      if (sleepOff) {
-        if (manualDimMode) {
-          sleepOff = false;
-          sleepDimmed = true;
-          setBacklight(BL_DIM);
-          pageDirty = true;
-          touchResetGate();
-        } else {
-          wakeDisplay(true);
-        }
-        return;
-      }
-
-      if (handleWifiForgetConfirmTouch(tx, ty)) {
-        return;
-      }
-
-      if (handleTimerDoneDialogTouch(tx, ty)) {
-        return;
-      }
-
-      const int bxWifi = topBarWifiForgetBtnX();
-      const int bxDim = topBarDimBtnX();
-      const int bxMoon = topBarMoonBtnX();
-      const int bs = TOPBAR_BTN_SZ;
-      if (ty <= TOPBAR_H && ty >= 0) {
-        if (tx >= bxMoon && tx < bxMoon + bs)
-          enterManualSleepFull();
-        else if (tx >= bxDim && tx < bxDim + bs)
-          toggleManualDimBar();
-        else if (tx >= bxWifi && tx < bxWifi + bs)
-          openWifiForgetConfirm();
+    if (sleepOff) {
+      if (manualDimMode) {
+        sleepOff = false;
+        sleepDimmed = true;
+        setBacklight(BL_DIM);
+        pageDirty = true;
+        touchResetGate();
       } else {
-        if (sleepDimmed) {
-          if (!manualDimMode) {
-            wakeDisplay(true);
-          } else {
-            if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
-              handleNavTouch(tx, ty);
-            }
-          }
+        wakeDisplay(true);
+      }
+      return;
+    }
+
+    if (handleWifiForgetConfirmTouch(tx, ty)) {
+      return;
+    }
+
+    if (handleTimerDoneDialogTouch(tx, ty)) {
+      return;
+    }
+
+    const int bxWifi = topBarWifiForgetBtnX();
+    const int bxDim = topBarDimBtnX();
+    const int bxMoon = topBarMoonBtnX();
+    const int bs = TOPBAR_BTN_SZ;
+    if (ty <= TOPBAR_H && ty >= 0) {
+      if (tx >= bxMoon && tx < bxMoon + bs)
+        enterManualSleepFull();
+      else if (tx >= bxDim && tx < bxDim + bs)
+        toggleManualDimBar();
+      else if (tx >= bxWifi && tx < bxWifi + bs)
+        openWifiForgetConfirm();
+    } else {
+      if (sleepDimmed) {
+        if (!manualDimMode) {
+          wakeDisplay(true);
         } else {
           if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
             handleNavTouch(tx, ty);
           }
         }
+      } else {
+        if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
+          handleNavTouch(tx, ty);
+        }
       }
     }
   }
-
-  pollNtfyIfDue();
 
   if (millis() - lastDataTick >= DATA_TICK_MS) {
     lastDataTick = millis();
@@ -3323,7 +3053,12 @@ void loop() {
     ensureFinance();
   }
 
-  /** Tam yenileme incremental saatten once: fullscreen overlay kapandiginda yari ekranda kalmasin. */
+  if (millis() - lastClockTick >= CLOCK_TICK_MS) {
+    lastClockTick = millis();
+    updateCurrentPageDynamic();
+    dataDirty = false;
+  }
+
   if (pageDirty || lastDrawnPage != currentPage) {
     drawCurrentPageFull();
     updateCurrentPageDynamic();
@@ -3331,14 +3066,7 @@ void loop() {
     dataDirty = false;
   }
 
-  if (millis() - lastClockTick >= CLOCK_TICK_MS) {
-    lastClockTick = millis();
-    updateCurrentPageDynamic();
-    dataDirty = false;
-  }
-
-  if (currentPage == PAGE_HOME && !focusMenuOpen && !timerDoneDialogOpen && !wifiForgetConfirmOpen && !ntfyPopupOpen &&
-      !sleepOff) {
+  if (currentPage == PAGE_HOME && !focusMenuOpen && !timerDoneDialogOpen && !wifiForgetConfirmOpen && !sleepOff) {
     static unsigned long lastBuddyAnimMs = 0;
     bool anyBuddy = false;
     for (int s = 0; s < HOME_SLOT_COUNT; s++) {
@@ -3350,6 +3078,7 @@ void loop() {
     if (anyBuddy && millis() - lastBuddyAnimMs >= 70UL) {
       lastBuddyAnimMs = millis();
       for (int s = 0; s < HOME_SLOT_COUNT; s++) {
+        if (((deskRemoteHideSlotBits >> s) & 1) != 0) continue;
         if (homeWidgetSlots[s] == HOME_WIDGET_BUDDY)
           drawHomeSlotWidget(s, false);
       }
