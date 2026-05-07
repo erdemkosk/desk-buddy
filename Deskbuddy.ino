@@ -1230,6 +1230,7 @@ void loadStoredSettings() {
 
   notesText = prefs.getString("notes", "Henuz not yok.");
   calendarUrl = prefs.getString("calUrl", "");
+  spotifyUrl = prefs.getString("spotifyUrl", "");
   buddyNickname = prefs.getString("nickname", "");
   locationName = prefs.getString("locname", "Berlin");
   LAT = prefs.getFloat("lat", 52.5200f);
@@ -3677,24 +3678,15 @@ void updateMeetingFlashState() {
     localtime_r(&nowT, &tmNow);
 
     bool isFlashingTime =
-        (tmNow.tm_hour == eh && tmNow.tm_min == em && tmNow.tm_sec < 5);
+        (tmNow.tm_hour == eh && tmNow.tm_min == em && tmNow.tm_sec < 10);
 
     if (isFlashingTime) {
       wasMeetingFlashing = true;
       bool flashOn = (millis() / 200UL) % 2UL == 0;
       setBacklight(flashOn ? FLASH_BL_HIGH : FLASH_BL_LOW);
-    } else {
-      if (wasMeetingFlashing) {
-        wasMeetingFlashing = false;
-        setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
-      }
-      if (tmNow.tm_hour > eh || (tmNow.tm_hour == eh && tmNow.tm_min >= em)) {
-        nextEventTitle = "Guncelleniyor...";
-        nextEventTime = "--:--";
-        lastCalendarFetch = 0;
-        dataDirty = true;
-        pageDirty = true;
-      }
+    } else if (wasMeetingFlashing) {
+      wasMeetingFlashing = false;
+      setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
     }
   }
 }
