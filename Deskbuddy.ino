@@ -2,7 +2,7 @@
 // Nav: Home / Weather / Notes / Status
 // Full version
 // - Home: Doviz (10 sn donusumlu), Buddy animasyonlu yuz, web slot secimi
-// - Home: outdoor slot basligi Sicaklik (deger + hava ikonu); Hava sayfasinda Disari kutusu
+// - Home + Hava (ust sol): Sicaklik basligi, deger + hava ikonu (aynı sprite cizimi)
 // - KP dots replaced with Low / Medium / High / Extreme text
 // - KP level text uses same small font as wind direction and stays inside the box
 // - Wind + direction added to Weather page
@@ -142,6 +142,11 @@ const int TOPBAR_BTN_MR = 5;
 
 static int topBarMoonBtnX() { return SCREEN_W - TOPBAR_BTN_SZ - TOPBAR_BTN_MR; }
 static int topBarDimBtnX() { return topBarMoonBtnX() - TOPBAR_BTN_SZ - TOPBAR_BTN_GAP; }
+
+/** Firmware semver; ust bardaki uyku/onleme tuslarinin solunda gosterilir. */
+static const char* FIRMWARE_VERSION = "v1.0.0";
+
+static int topBarVersionRightX() { return topBarDimBtnX() - 6; }
 
 const int HOME_GRID_Y1 = 120;
 const int HOME_GRID_Y2 = 198;
@@ -527,10 +532,10 @@ static String formatDisplayTemp(float value) {
 
 /** Tek satir: Y: 21C A: 8C */
 static String tempRangeInline() {
-  return String("Y: ") + formatDisplayTemp(tempMaxC) + " A: " + formatDisplayTemp(tempMinC);
+  return String("Y:") + formatDisplayTemp(tempMaxC) + " A:" + formatDisplayTemp(tempMinC);
 }
 
-/** Dışarı kutusu: 108x70 kart; origin = kart sol üst (Hava: 8+PAGE_ROW1_Y, Ana: sprite 0,0). */
+/** Sicaklik kutusu: 108x70 kart; origin = kart sol üst (Hava: 8+PAGE_ROW1_Y, Ana: sprite 0,0). */
 static const int DISARI_CARD_LEFT   = 8;
 static const int DISARI_TX         = 10;
 static const int DISARI_INNER_TOP  = 6;
@@ -1465,6 +1470,11 @@ void drawTopBar(const String& title) {
   tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
   tft.drawString(title, 10, 9, 2);
 
+  tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(COL_DIM, COL_PANEL_ALT);
+  tft.drawString(FIRMWARE_VERSION, topBarVersionRightX(), 11, 1);
+  tft.setTextDatum(TL_DATUM);
+
   const int bs = TOPBAR_BTN_SZ;
   const int by = (TOPBAR_H - bs) / 2;
   const int bxDim = topBarDimBtnX();
@@ -1816,15 +1826,20 @@ static void drawDisariTileAt(TFT_eSPI& g, int ox, int oy, const char* title,
   g.drawString(tempRangeInline(), tx, oy + DISARI_RANGE_Y, 1);
 }
 
-void drawOutdoorHomeWidget(int x, int y, int w, int h, String& cache, bool force = false) {
-  String rIn = tempRangeInline();
+static String outdoorTileCacheKey() {
   WxKind wk = wxKindFromCode(weatherCode, weatherIsDay);
-  String combined = tempText() + "|" + rIn + "|" + String((int)wk) + "|" +
-                    String(weatherCode) + "|" + String(weatherIsDay) + "|" +
-                    String(COL_ACCENT) + "|" + String(COL_DIM) + "|" + String(COL_PANEL);
+  return tempText() + "|" + tempRangeInline() + "|" + String((int)wk) + "|" +
+         String(weatherCode) + "|" + String(weatherIsDay) + "|" +
+         String(COL_ACCENT) + "|" + String(COL_DIM) + "|" + String(COL_PANEL);
+}
+
+void drawOutdoorHomeWidget(int x, int y, int w, int h, String& cache, bool force = false) {
+  String combined = outdoorTileCacheKey();
 
   if (!force && combined == cache) return;
   cache = combined;
+
+  WxKind wk = wxKindFromCode(weatherCode, weatherIsDay);
 
   makeSpriteCard(sprSmall, w, h, true);
   drawDisariTileAt(sprSmall, 0, 0, homeWidgetLabel(HOME_WIDGET_OUTDOOR), tempText(), wk);
@@ -2377,14 +2392,13 @@ void drawWeatherPageFull() {
 
 void updateWeatherDynamic() {
   WxKind wk = wxKindFromCode(weatherCode, weatherIsDay);
-  String t = tempText();
-  String rIn = tempRangeInline();
-  String tempCombined = t + "|" + rIn + "|" + String((int)wk) + "|" +
-                        String(weatherCode) + "|" + String(COL_ACCENT);
+  String key = outdoorTileCacheKey();
 
-  if (tempCombined != lastTempText || dataDirty) {
-    drawDisariTileAt(tft, DISARI_CARD_LEFT, PAGE_ROW1_Y, "Disari", t, wk);
-    lastTempText = tempCombined;
+  if (key != lastTempText || dataDirty) {
+    makeSpriteCard(sprSmall, 108, PAGE_WIDGET_H, true);
+    drawDisariTileAt(sprSmall, 0, 0, homeWidgetLabel(HOME_WIDGET_OUTDOOR), tempText(), wk);
+    pushSpriteAndDelete(sprSmall, DISARI_CARD_LEFT, PAGE_ROW1_Y);
+    lastTempText = key;
   }
 
   String r = rainText();
@@ -2799,6 +2813,9 @@ void handleRoot() {
   page += "<p>Adjust notes, colors, system settings, and location from your browser.</p>";
   page += "<div class='ip'>ESP IP: ";
   page += WiFi.localIP().toString();
+  page += "</div>";
+  page += "<div class='footer-note' style='margin-top:12px'>Firmware ";
+  page += FIRMWARE_VERSION;
   page += "</div></div>";
 
   page += "<form method='POST' action='/save'>";
