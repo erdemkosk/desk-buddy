@@ -290,6 +290,17 @@ bool timerDoneDialogOpen = false;
 unsigned long timerDoneDialogStartedMs = 0;
 /** Wi-Fi NVS kaydini silmeden once onay kutusu */
 bool wifiForgetConfirmOpen = false;
+
+/** ntfy.sh JSON poll bildirimi (Wi‑Fi unut kutusuyla ayni kart boyutu) */
+bool ntfyPopupOpen = false;
+String ntfyPopupTitleStr;
+String ntfyPopupBodyStr;
+unsigned long ntfyPopupUntilMs = 0;
+
+const unsigned long NTFY_POLL_INTERVAL_MS = 28000UL;
+const unsigned long NTFY_POPUP_VISIBLE_MS = 5000UL;
+static unsigned long lastNtfyPollMs = 0;
+static String cacheNtfyPopupComb = "";
 const unsigned long TIMER_DONE_DIALOG_MS = 60UL * 1000UL;
 bool flashModeEnabled = false;
 int timerPresetMin[6] = {1, 5, 10, 15, 25, 30};
@@ -904,7 +915,7 @@ void enterManualSleepFull() {
 
 
 void handleAutoSleep() {
-  if (focusMenuOpen || timerDoneDialogOpen || wifiForgetConfirmOpen) return;
+  if (focusMenuOpen || timerDoneDialogOpen || wifiForgetConfirmOpen || ntfyPopupOpen) return;
   if (sleepIntervalMin <= 0) return;
 
   unsigned long now = millis();
@@ -1515,6 +1526,163 @@ bool handleWifiForgetConfirmTouch(int x, int y) {
 
   dismissWifiForgetConfirm();
   return true;
+}
+
+void dismissNtfyPopup() {
+  if (!ntfyPopupOpen) return;
+  ntfyPopupOpen = false;
+  ntfyPopupTitleStr = "";
+  ntfyPopupBodyStr = "";
+  ntfyPopupUntilMs = 0;
+  cacheNtfyPopupComb = "";
+  pageDirty = true;
+}
+
+void updateNtfyPopupExpiry() {
+  if (!ntfyPopupOpen) return;
+  if ((long)(millis() - ntfyPopupUntilMs) >= 0) dismissNtfyPopup();
+}
+
+/** Mesaji kutuya sigdir; font 1, ~26 karakter satir */
+static String ntfyTakeLineBreak(String& rest, size_t cols) {
+  rest.trim();
+  if (rest.length() == 0) return "";
+  size_t cut = cols;
+  if (rest.length() > cols) {
+    int sp = rest.lastIndexOf(' ', cols);
+    if (sp > 10) cut = (size_t)sp;
+    else cut = cols;
+  }
+  String ln = rest.substring(0, cut);
+  rest = rest.substring(cut < rest.length() ? cut : rest.length());
+  rest.trim();
+  return ln;
+}
+
+void drawNtfyPopupOverlay(bool force = false) {
+  if (!ntfyPopupOpen) return;
+
+  const String combined = ntfyPopupTitleStr + "|" + ntfyPopupBodyStr + "|" + String(COL_PANEL_ALT) + "|" +
+                          String(COL_ACCENT) + "|" + String(COL_TEXT);
+  if (!force && combined == cacheNtfyPopupComb) return;
+  cacheNtfyPopupComb = combined;
+
+  const int cx = WIFI_FORGET_DLG_X + WIFI_FORGET_DLG_W / 2;
+
+  tft.fillScreen(COL_BG);
+  tft.fillRoundRect(WIFI_FORGET_DLG_X, WIFI_FORGET_DLG_Y, WIFI_FORGET_DLG_W, WIFI_FORGET_DLG_H, 12, COL_PANEL_ALT);
+  tft.drawRoundRect(WIFI_FORGET_DLG_X, WIFI_FORGET_DLG_Y, WIFI_FORGET_DLG_W, WIFI_FORGET_DLG_H, 12, COL_ACCENT);
+
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+  tft.drawString(ntfyPopupTitleStr.length() ? ntfyPopupTitleStr.c_str() : "ntfy", cx, WIFI_FORGET_DLG_Y + 24, 2);
+
+  tft.setTextColor(COL_DIM, COL_PANEL_ALT);
+  String rest = ntfyPopupBodyStr;
+  int y = WIFI_FORGET_DLG_Y + 52;
+  for (int ln = 0; ln < 5 && rest.length(); ln++) {
+    String row = ntfyTakeLineBreak(rest, 26);
+    if (row.length()) tft.drawString(row, cx, y, 1);
+    y += 14;
+  }
+
+  tft.drawString("Dokun veya otomatik kapanir.", cx, WIFI_FORGET_DLG_Y + WIFI_FORGET_DLG_H - 18, 1);
+  tft.setTextDatum(TL_DATUM);
+}
+
+void pollNtfyIfDue() {
+  if (!wifiEnabled || WiFi.status() != WL_CONNECTED) return;
+  if (wifiForgetConfirmOpen || timerDoneDialogOpen || ntfyPopupOpen || focusMenuOpen) return;
+
+  unsigned long now = millis();
+  if ((now - lastNtfyPollMs) < NTFY_POLL_INTERVAL_MS) return;
+  lastNtfyPollMs = now;
+
+  String topic = prefs.getString("ntfyTopic", NTFY_DEFAULT_TOPIC);
+  topic.trim();
+  if (topic.length() == 0) return;
+
+  String lastIdPersisted = prefs.getString("ntfyLastId", "");
+  const bool scanAll = (lastIdPersisted.length() == 0);
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(12000);
+
+  String url = String("https://ntfy.sh/") + topic + "/json";
+  if (scanAll) url += "?since=all";
+  else url += "?since=" + lastIdPersisted;
+
+  HTTPClient http;
+  http.setTimeout(12000);
+  if (!http.begin(client, url)) return;
+
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    return;
+  }
+
+  WiFiClient& stream = http.getStream();
+
+  String lastIdSeen = lastIdPersisted;
+  String candTitle = "ntfy";
+  String candBody;
+  bool haveMessageEvent = false;
+  unsigned long watchdog = millis() + 25000UL;
+  int lineCap = 0;
+
+  for (;;) {
+    if (millis() > watchdog || lineCap >= 260) break;
+    if (!stream.available()) {
+      if (!http.connected()) break;
+      delay(5);
+      if (!stream.available() && !http.connected()) break;
+      continue;
+    }
+
+    String line = stream.readStringUntil('\n');
+    line.trim();
+    lineCap++;
+    if (line.length() == 0) continue;
+
+    StaticJsonDocument<900> jd;
+    if (deserializeJson(jd, line)) continue;
+
+    const char* idRaw = jd["id"];
+    if (idRaw && strlen(idRaw)) lastIdSeen = String(idRaw);
+
+    if (scanAll) continue;
+
+    const char* ev = jd["event"];
+    if (!ev || strcmp(ev, "message") != 0) continue;
+
+    const char* titleRaw = jd["title"];
+    const char* msgRaw = jd["message"];
+
+    candTitle = (titleRaw && strlen(titleRaw)) ? String(titleRaw) : String("ntfy");
+    if (msgRaw && strlen(msgRaw)) candBody = String(msgRaw);
+    else candBody = (titleRaw && strlen(titleRaw)) ? String(titleRaw) : String("");
+
+    if (candBody.length() > 0) haveMessageEvent = true;
+  }
+  http.end();
+
+  if (lastIdSeen.length() > 0) prefs.putString("ntfyLastId", lastIdSeen);
+
+  if (scanAll || !haveMessageEvent || candBody.length() == 0) return;
+
+  if (candTitle.length() > 36) candTitle = candTitle.substring(0, 36);
+  if (candBody.length() > 320) candBody = candBody.substring(0, 320);
+
+  ntfyPopupTitleStr = candTitle;
+  ntfyPopupBodyStr = candBody;
+  ntfyPopupUntilMs = millis() + NTFY_POPUP_VISIBLE_MS;
+  ntfyPopupOpen = true;
+  wakeDisplay(false);
+  lastInteractionMs = millis();
+  cacheNtfyPopupComb = "";
+  pageDirty = true;
 }
 
 void drawTopBar(const String& title) {
@@ -2666,12 +2834,18 @@ void drawCurrentPageFull() {
 
   if (focusMenuOpen && currentPage == PAGE_HOME) drawFocusMenuOverlay(true);
   if (timerDoneDialogOpen) drawTimerDoneOverlay(true);
+  if (ntfyPopupOpen) drawNtfyPopupOverlay(true);
   if (wifiForgetConfirmOpen) drawWifiForgetConfirmOverlay(true);
 }
 
 void updateCurrentPageDynamic() {
   if (wifiForgetConfirmOpen) {
     drawWifiForgetConfirmOverlay(false);
+    return;
+  }
+
+  if (ntfyPopupOpen) {
+    drawNtfyPopupOverlay(false);
     return;
   }
 
@@ -2962,6 +3136,8 @@ void loop() {
   updateWiFiConnectionState();
   updateFocusTimerState();
   updateTimerDoneDialogState();
+  updateNtfyPopupExpiry();
+  pollNtfyIfDue();
   handleAutoSleep();
 
   int tx = 0, ty = 0;
@@ -2982,6 +3158,11 @@ void loop() {
     }
 
     if (handleWifiForgetConfirmTouch(tx, ty)) {
+      return;
+    }
+
+    if (ntfyPopupOpen) {
+      dismissNtfyPopup();
       return;
     }
 
@@ -3038,7 +3219,8 @@ void loop() {
     dataDirty = false;
   }
 
-  if (currentPage == PAGE_HOME && !focusMenuOpen && !timerDoneDialogOpen && !wifiForgetConfirmOpen && !sleepOff) {
+  if (currentPage == PAGE_HOME && !focusMenuOpen && !timerDoneDialogOpen && !wifiForgetConfirmOpen && !ntfyPopupOpen &&
+      !sleepOff) {
     static unsigned long lastBuddyAnimMs = 0;
     bool anyBuddy = false;
     for (int s = 0; s < HOME_SLOT_COUNT; s++) {

@@ -12,4 +12,7 @@
 inline constexpr const char* DESKBUDDY_SOFTAP_SSID = "Deskbuddy-Setup";
 
 /** Firmware semver; drawTopBar + web */
-inline constexpr const char* FIRMWARE_VERSION = "v1.2.0";
+inline constexpr const char* FIRMWARE_VERSION = "v1.2.1";
+
+/** Varsayilan ntfy.sh public topic (NVS anahtari: ntfyTopic). */
+inline constexpr const char* NTFY_DEFAULT_TOPIC = "deskbuddy";
