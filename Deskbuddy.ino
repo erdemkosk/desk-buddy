@@ -1702,6 +1702,69 @@ static bool fetchCalendarData() {
   return got;
 }
 
+static void cleanTr(String &s) {
+  s.replace("ş", "s");
+  s.replace("Ş", "S");
+  s.replace("ı", "i");
+  s.replace("İ", "I");
+  s.replace("ğ", "g");
+  s.replace("Ğ", "G");
+  s.replace("ü", "u");
+  s.replace("Ü", "U");
+  s.replace("ö", "o");
+  s.replace("Ö", "O");
+  s.replace("ç", "c");
+  s.replace("Ç", "C");
+}
+
+static bool fetchSpotifyData() {
+  if (WiFi.status() != WL_CONNECTED || spotifyUrl.length() < 10)
+    return false;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(15000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+  bool got = false;
+  if (http.begin(client, spotifyUrl)) {
+    if (http.GET() == 200) {
+      String body = http.getString();
+      DynamicJsonDocument doc(512);
+      if (!deserializeJson(doc, body)) {
+        if (doc.containsKey("song")) {
+          String sSong = doc["song"].as<String>();
+          String sArtist = doc["artist"].as<String>();
+          cleanTr(sSong);
+          cleanTr(sArtist);
+          bool sPlaying = doc["playing"].as<bool>();
+
+          if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
+            spotifySong = sSong;
+            spotifyArtist = sArtist;
+            spotifyPlaying = sPlaying;
+            lastSpotifyFetch = time(nullptr);
+            xSemaphoreGive(spotifyMutex);
+          }
+          got = true;
+          dataDirty = true;
+        }
+      }
+    }
+    http.end();
+  }
+
+  if (got || spotifyUrl.length() >= 10) {
+    if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
+      lastSpotifyFetch = time(nullptr);
+      lastSyncTime = lastSpotifyFetch;
+      xSemaphoreGive(spotifyMutex);
+    }
+  }
+  return got;
+}
+
 void networkFetchTask(void *pvParameters) {
   while (true) {
     if (WiFi.status() == WL_CONNECTED) {
