@@ -14,34 +14,7 @@
 
 // Arduino: otomatik fonksiyon prototipleri son #include'dan sonra eklenir;
 // parametre tipleri (HomeWidgetType, WxKind) include'lardan once tanimlanir.
-enum HomeWidgetType {
-  HOME_WIDGET_HUMIDITY = 0,
-  HOME_WIDGET_TIMER,
-  HOME_WIDGET_RAIN,
-  HOME_WIDGET_OUTDOOR,
-  HOME_WIDGET_KP,
-  HOME_WIDGET_UV,
-  HOME_WIDGET_WIND,
-  HOME_WIDGET_SUN,
-  HOME_WIDGET_FINANCE,
-  HOME_WIDGET_BUDDY
-};
-const int HOME_SLOT_COUNT = 4;
-
-/** Open-Meteo WMO weather_code */
-enum WxKind {
-  WX_UNK,
-  WX_CLEAR_DAY,
-  WX_CLEAR_NIGHT,
-  WX_PARTLY,
-  WX_CLOUD,
-  WX_FOG,
-  WX_DRIZZLE,
-  WX_RAIN,
-  WX_SNOW,
-  WX_SHOWER,
-  WX_THUNDER
-};
+#include "Deskbuddy_types.h"
 
 #include <WiFi.h>
 #include <DNSServer.h>
@@ -56,23 +29,11 @@ enum WxKind {
 #include <XPT2046_Touchscreen.h>
 #include <math.h>
 #include <stdio.h>
-#include "qrcode.h"
 
-// =========================================================
-// WIFI
-// =========================================================
-// NVS anahtarlari: wifiSsid, wifiPass (kurulum portalindan yazilir).
-// Ilk kullanimda bos ise "Deskbuddy-Setup" AP + tarayici 192.168.4.1
-//
-// Isteg bagli tek seferlik tasma (bir kez NVS'e yazilir, sonra bu satirlari bos birakin):
-#ifndef DESKBUDDY_WIFI_FALLBACK_SSID
-#define DESKBUDDY_WIFI_FALLBACK_SSID ""
-#endif
-#ifndef DESKBUDDY_WIFI_FALLBACK_PASS
-#define DESKBUDDY_WIFI_FALLBACK_PASS ""
-#endif
-
-static const char* WIFI_AP_SSID = "Deskbuddy-Setup";
+#include "Deskbuddy_config.h"
+#include "Deskbuddy_layout.h"
+#include "db_wifi_provision.h"
+#include "db_web_server.h"
 
 // =========================================================
 // DISPLAY / TOUCH
@@ -144,52 +105,6 @@ String unitKey = "metric"; // metric = C/mm, imperial = F/in
 String regionFormatKey = "europe"; // europe = 24h + dd.mm.yyyy, us = 12h + mm/dd/yyyy
 
 // =========================================================
-// LAYOUT
-// =========================================================
-const int SCREEN_W = 240;
-const int SCREEN_H = 320;
-const int TOPBAR_H = 34;
-const int NAV_H    = 44;
-
-/** Ust bar sag: wifi unut (sol), daralt, tam uyku / ay (sag). */
-const int TOPBAR_BTN_SZ = 23;
-const int TOPBAR_BTN_GAP = 11;
-const int TOPBAR_BTN_MR = 5;
-
-static int topBarMoonBtnX() { return SCREEN_W - TOPBAR_BTN_SZ - TOPBAR_BTN_MR; }
-static int topBarDimBtnX() { return topBarMoonBtnX() - TOPBAR_BTN_SZ - TOPBAR_BTN_GAP; }
-static int topBarWifiForgetBtnX() { return topBarDimBtnX() - TOPBAR_BTN_SZ - TOPBAR_BTN_GAP; }
-
-/** Firmware semver; baslik yaninda gosterilir (drawTopBar). */
-static const char* FIRMWARE_VERSION = "v1.2.0";
-
-const int HOME_GRID_Y1 = 120;
-const int HOME_GRID_Y2 = 198;
-const int HOME_WIDGET_H = 70;
-
-const int HOME_TIMER_X = 124;
-const int HOME_TIMER_Y = HOME_GRID_Y1;
-const int HOME_TIMER_W = 108;
-const int HOME_TIMER_H = HOME_WIDGET_H;
-const int TIMER_MENU_X = 20;
-const int TIMER_MENU_Y = 68;
-const int TIMER_MENU_W = 200;
-const int TIMER_MENU_H = 194;
-const int TIMER_DONE_X = 26;
-const int TIMER_DONE_Y = 92;
-const int TIMER_DONE_W = 188;
-const int TIMER_DONE_H = 108;
-/** Wi-Fi agini unut onay kutusu */
-const int WIFI_FORGET_DLG_X = 16;
-const int WIFI_FORGET_DLG_Y = 88;
-const int WIFI_FORGET_DLG_W = 208;
-const int WIFI_FORGET_DLG_H = 144;
-const int PAGE_ROW1_Y = 42;
-const int PAGE_ROW2_Y = 120;
-const int PAGE_ROW3_Y = 198;
-const int PAGE_WIDGET_H = HOME_WIDGET_H;
-
-// =========================================================
 // NOTES
 // =========================================================
 String notesText = "Henuz not yok.";
@@ -225,13 +140,6 @@ String cacheHomeSlots[HOME_SLOT_COUNT];
 // =========================================================
 // STATE
 // =========================================================
-enum Page {
-  PAGE_HOME = 0,
-  PAGE_WEATHER = 1,
-  PAGE_NOTES = 2,
-  PAGE_STATUS = 3
-};
-
 Page currentPage = PAGE_HOME;
 Page lastDrawnPage = (Page)-1;
 
@@ -425,6 +333,8 @@ static time_t lastSyncTime = 0;
 // =========================================================
 // SLEEP / BACKLIGHT
 // =========================================================
+// Pin ve durum; setBacklight / uyku fonksiyonlari HELPERS bolumunun sonunda.
+
 const int BACKLIGHT_PIN = 21;
 
 bool sleepDimmed = false;
@@ -448,6 +358,10 @@ int sanitizeTimerMinutes(int value);
 // =========================================================
 // HELPERS
 // =========================================================
+// Skete bagli yardimcilar: zaman/ag metinleri, hava-finans UI, web renk HTML,
+// odak zamanlayici, parlaklik. (Web route handler'lari db_web_server.cpp.)
+
+// --- Zaman / bolge ---
 static int ymdFromLocal(time_t t) {
   struct tm tmLocal;
   localtime_r(&t, &tmLocal);
@@ -467,6 +381,7 @@ static int minutesNowLocal() {
   return tmNow.tm_hour * 60 + tmNow.tm_min;
 }
 
+// --- WiFi ozet satiri ---
 static String wifiStatusText() {
   if (!wifiEnabled) return "Kapali";
   return WiFi.status() == WL_CONNECTED ? "Bagli" : "Net yok";
@@ -482,6 +397,7 @@ static String ipText() {
   return WiFi.localIP().toString();
 }
 
+// --- Saat / tarih yazimi ---
 static bool useUsRegionFormat() {
   return regionFormatKey == "us";
 }
@@ -531,6 +447,7 @@ static String formatMinuteOfDay(int minOfDay) {
   return String(buf);
 }
 
+// --- Hava / finans / durum kart metinleri ---
 static String tempText() {
   if (isnan(tempC)) return unitKey == "imperial" ? "--.-F" : "--.-C";
 
@@ -740,7 +657,8 @@ static String nextSunTimeText() {
   return formatMinuteOfDay(sunriseMin);
 }
 
-static String htmlEscape(const String& s) {
+// --- Web ayar paneli (HTML kacis + 565->CSS onizleme) ---
+String htmlEscape(const String& s) {
   String out;
   out.reserve(s.length());
   for (size_t i = 0; i < s.length(); i++) {
@@ -763,7 +681,7 @@ static String cssColorFrom565(uint16_t color) {
   return String(buf);
 }
 
-static String accentPreviewCss(const String& key) {
+String accentPreviewCss(const String& key) {
   if (key == "standard") return cssColorFrom565(0xEF7D);
   if (key == "ice")      return cssColorFrom565(0xEFFF);
   if (key == "white")    return cssColorFrom565(TFT_WHITE);
@@ -779,7 +697,7 @@ static String accentPreviewCss(const String& key) {
   return cssColorFrom565(0xEF7D);
 }
 
-static String themePreviewCss(const String& key) {
+String themePreviewCss(const String& key) {
   if (key == "slate")    return cssColorFrom565(0x08A3);
   if (key == "deep")     return cssColorFrom565(0x0000);
   if (key == "nordic")   return cssColorFrom565(0x0864);
@@ -793,6 +711,7 @@ static String themePreviewCss(const String& key) {
   return cssColorFrom565(0x08A3);
 }
 
+// --- Odak zamanlayici (metinler + durum + diyalog) ---
 static String formatTimerClock(unsigned long totalSec) {
   unsigned long minutes = totalSec / 60UL;
   unsigned long seconds = totalSec % 60UL;
@@ -922,6 +841,7 @@ void updateTimerDoneDialogState() {
   }
 }
 
+// --- Parlaklik ve uyku ---
 void setBacklight(int value) {
   value = constrain(value, 0, 255);
   analogWrite(BACKLIGHT_PIN, value);
@@ -1490,12 +1410,21 @@ static void drawTopBarMoonSleepIcon(TFT_eSPI& g, int cx, int cy, uint16_t moonCo
   g.fillCircle(cx + 4, cy - 2, 7, maskBg);
 }
 
-/** Kucuk "wifi sil / unut" isareti */
+/** Wi-Fi sifirlama / kurulum yenileme: dongusel yay + ok (sil/cop ile karismasin diye acik yay). */
 static void drawTopBarWifiForgetIcon(TFT_eSPI& g, int cx, int cy, uint16_t fg) {
-  g.drawFastHLine(cx - 7, cy - 4, 5, fg);
-  g.drawFastHLine(cx - 5, cy - 1, 9, fg);
-  g.drawFastHLine(cx - 7, cy + 2, 14, fg);
-  g.drawLine(cx + 3, cy - 6, cx + 7, cy + 6, fg);
+  // Saat yonu acik yay (orta alt etrafindan ust sag'a), ok ucu kurulum/tekrar anlaminda
+  const struct { signed char dx; signed char dy; } pt[] = {
+      { -8, 3}, { -9, 1}, {-10, -1}, {-9, -4}, {-7, -6}, {-4, -8},
+      {  0, -9}, { 4, -8}, { 7, -6}, { 9, -3}
+  };
+  const int n = (int)(sizeof(pt) / sizeof(pt[0]));
+  for (int i = 1; i < n; i++) {
+    g.drawLine(cx + pt[i - 1].dx, cy + pt[i - 1].dy,
+               cx + pt[i].dx,     cy + pt[i].dy,     fg);
+  }
+  // Ok ucu (sag-ust, saat yonu devam)
+  g.drawLine(cx + 9, cy - 3, cx + 7, cy - 7, fg);
+  g.drawLine(cx + 9, cy - 3, cx + 5, cy - 3, fg);
 }
 
 static void performWifiForgetAndRestart() {
@@ -2871,529 +2800,6 @@ void handleNavTouch(int x, int y) {
   }
 }
 
-// =========================================================
-// WIFI PROVISIONING (captive portal, NVS: wifiSsid / wifiPass)
-// =========================================================
-static void handleProvisionCaptiveRedirect() {
-  server.sendHeader("Location", "http://192.168.4.1/");
-  server.send(302, "text/plain", "");
-}
-
-static void handleProvisionRoot() {
-  String h;
-  h.reserve(1800);
-  h += "<!doctype html><html><head><meta charset='utf-8'>";
-  h += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
-  h += "<title>Deskbuddy Wi-Fi</title>";
-  h += "<style>body{margin:0;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;padding:24px;}";
-  h += "h1{font-size:22px;margin:0 0 8px;}p{color:#94a3b8;font-size:14px;line-height:1.45;margin:0 0 16px;}";
-  h += "label{display:block;font-size:13px;margin:12px 0 6px;color:#cbd5e1;font-weight:600;}";
-  h += "input{width:100%;max-width:360px;padding:12px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#f1f5f9;box-sizing:border-box;font:inherit;}";
-  h += "button{margin-top:18px;background:#38bdf8;border:none;color:#0c1220;padding:12px 20px;border-radius:10px;font-weight:800;cursor:pointer;font:inherit;}</style></head><body>";
-  h += "<h1>Wi-Fi kurulumu</h1>";
-  h += "<p class='muted'>Once cihaz ekranindaki QR ile katilin; sonra bu formu kullanabilirsiniz.</p>";
-  h += "<p>Ev aginizin adini ve sifresini girin. Kaydettikten sonra cihaz yeniden baslar ve bu aga baglanir.</p>";
-  h += "<form method='POST' action='/savewifi'>";
-  h += "<label>Ag adi (SSID)</label><input name='ssid' maxlength='32' required autocomplete='off'>";
-  h += "<label>Sifre (acik ag ise bos)</label><input name='pass' maxlength='64' type='password' autocomplete='new-password'>";
-  h += "<button type='submit'>Kaydet ve yeniden baslat</button></form></body></html>";
-  server.send(200, "text/html; charset=utf-8", h);
-}
-
-static void handleProvisionSave() {
-  if (!server.hasArg("ssid")) {
-    server.send(400, "text/plain", "ssid gerekli");
-    return;
-  }
-  String ssid = server.arg("ssid");
-  String pass = server.hasArg("pass") ? server.arg("pass") : "";
-  ssid.trim();
-  pass.trim();
-  if (ssid.length() == 0) {
-    server.send(400, "text/plain", "SSID bos olamaz");
-    return;
-  }
-  prefs.putString("wifiSsid", ssid);
-  prefs.putString("wifiPass", pass);
-  server.send(200, "text/html; charset=utf-8",
-               "<!doctype html><meta charset='utf-8'><p style='font-family:sans-serif'>Kaydedildi. Yeniden basliyor...</p>");
-  delay(400);
-  ESP.restart();
-}
-
-/** Kurulum ekraninda WIFI:T:nopass ile ag katilimi QR (ricmoo/qrcode MIT). Alt metin ile dönüş y ekseni (px). */
-static int drawProvisionWifiJoinQr(int topY) {
-  char payload[128];
-  snprintf(payload, sizeof(payload), "WIFI:T:nopass;S:%s;P:;H:false;;", WIFI_AP_SSID);
-
-  static uint8_t qrWorkspace[1024];
-  QRCode qr;
-  int8_t ok = -1;
-
-  for (uint8_t ver = 4; ver <= 10; ver++) {
-    uint16_t need = qrcode_getBufferSize(ver);
-    if (need > sizeof(qrWorkspace)) break;
-    ok = qrcode_initText(&qr, qrWorkspace, ver, ECC_LOW, payload);
-    if (ok == 0) break;
-  }
-
-  if (ok != 0) {
-    tft.setTextDatum(TL_DATUM);
-    tft.setTextColor(COL_DIM, COL_BG);
-    tft.drawString("QR olusmadi,", 10, topY + 4, 1);
-    tft.drawString("elle ag secin:", 10, topY + 18, 1);
-    return topY + 36;
-  }
-
-  const uint8_t ms = qr.size;
-  int px = 4;
-  const int footerReserve = 104;
-  while (px >= 2) {
-    int qw = (int)ms * px;
-    int margin = px * 2;
-    if (topY + qw + margin * 2 + footerReserve <= SCREEN_H) break;
-    px--;
-  }
-
-  const int qw = (int)ms * px;
-  const int margin = px * 2;
-  const int ox = (SCREEN_W - qw) / 2;
-  const int oy = topY;
-
-  tft.fillRect(ox - margin, oy - margin, qw + 2 * margin, qw + 2 * margin, TFT_WHITE);
-  for (uint8_t y = 0; y < ms; y++) {
-    for (uint8_t x = 0; x < ms; x++) {
-      uint16_t c = qrcode_getModule(&qr, x, y) ? TFT_BLACK : TFT_WHITE;
-      tft.fillRect(ox + (int)x * px, oy + (int)y * px, px, px, c);
-    }
-  }
-
-  tft.setTextDatum(TC_DATUM);
-  tft.setTextColor(COL_DIM, COL_BG);
-  int capBaseline = oy + qw + margin + 2;
-  tft.drawString("Kamera ile QR okut", SCREEN_W / 2, capBaseline, 1);
-  tft.setTextDatum(TL_DATUM);
-
-  return capBaseline + 12;
-}
-
-/** Bos NVS + WiFi acik: AP acar, DNS yonlendirir, / formu. Sonunda ESP.restart. */
-void runWifiProvisioningIfNeeded() {
-  if (!wifiEnabled) return;
-  if (prefs.getString("wifiSsid", "").length() > 0) return;
-
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(WIFI_AP_SSID);
-  IPAddress apIP(192, 168, 4, 1);
-  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-
-  dnsServer.start(53, "*", apIP);
-
-  server.on("/", HTTP_GET, handleProvisionRoot);
-  server.on("/savewifi", HTTP_POST, handleProvisionSave);
-  server.on("/generate_204", HTTP_GET, handleProvisionCaptiveRedirect);
-  server.on("/hotspot-detect.html", HTTP_GET, handleProvisionCaptiveRedirect);
-  server.on("/canonical.html", HTTP_GET, handleProvisionCaptiveRedirect);
-  server.onNotFound([]() { handleProvisionCaptiveRedirect(); });
-  server.begin();
-
-  tft.fillScreen(COL_BG);
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(COL_TEXT, COL_BG);
-  tft.drawString("Wi-Fi kurulum", 10, 4, 2);
-  tft.setTextColor(COL_ACCENT, COL_BG);
-  tft.drawString("QR -> ag katilimi", 10, 22, 1);
-  tft.setTextColor(COL_DIM, COL_BG);
-  tft.drawString(WIFI_AP_SSID, 10, 34, 1);
-
-  int nextY = drawProvisionWifiJoinQr(82);
-  if (nextY + 50 > SCREEN_H) nextY = SCREEN_H - 52;
-  tft.setTextColor(COL_DIM, COL_BG);
-  tft.drawString("Tarayici:", 10, nextY, 1);
-  tft.setTextColor(COL_TEXT, COL_BG);
-  tft.drawString("192.168.4.1", 10, nextY + 14, 2);
-  tft.setTextColor(COL_DIM, COL_BG);
-  tft.drawString("Kayit -> otomatik reset", 10, nextY + 40, 1);
-
-  for (;;) {
-    dnsServer.processNextRequest();
-    server.handleClient();
-    delay(4);
-  }
-}
-
-// =========================================================
-// WEB SERVER
-// =========================================================
-void handleRoot() {
-  String accent = prefs.getString("accent", "cyan");
-  String bg     = prefs.getString("bg", "slate");
-  String txt    = prefs.getString("text", "standard");
-  String units  = prefs.getString("units", "metric");
-  String region = prefs.getString("region", "europe");
-  String nickname = prefs.getString("nickname", "");
-  bool flashMode = prefs.getBool("flashMode", false);
-  String homeSlotKeys[HOME_SLOT_COUNT];
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    homeSlotKeys[i] = prefs.getString((String("homeSlot") + String(i)).c_str(), homeWidgetKey(homeWidgetSlots[i]));
-  }
-
-  String page;
-  page.reserve(21000);
-
-  page += "<!doctype html><html><head>";
-  page += "<meta charset='utf-8'>";
-  page += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
-  page += "<title>Deskbuddy</title>";
-  page += "<style>";
-  page += ":root{color-scheme:dark;}";
-  page += "body{margin:0;background:linear-gradient(180deg,#0b1018 0%,#111827 100%);color:#edf2f7;font-family:system-ui,sans-serif;}";
-  page += ".wrap{max-width:980px;margin:0 auto;padding:28px 16px 36px;}";
-  page += ".hero{margin-bottom:18px;padding:18px 20px;border:1px solid #243244;border-radius:20px;background:linear-gradient(135deg,#111927 0%,#172235 100%);box-shadow:0 10px 30px rgba(0,0,0,.22);}";
-  page += ".hero h1{font-size:30px;margin:0 0 8px 0;}";
-  page += ".hero p{margin:0;color:#a9b7c9;font-size:14px;}";
-  page += ".ip{display:inline-block;margin-top:14px;padding:8px 12px;border-radius:999px;background:#0b1220;border:1px solid #334155;color:#dbe7f5;font-size:13px;}";
-  page += ".layout{display:grid;grid-template-columns:1.15fr .85fr;gap:16px;align-items:start;}";
-  page += ".stack{display:grid;gap:16px;}";
-  page += ".panel{background:#171b22;border:1px solid #2d3748;border-radius:18px;padding:18px;margin:0;}";
-  page += ".panel-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;background:none;border:none;color:#edf2f7;padding:0;margin:0;cursor:pointer;text-align:left;}";
-  page += ".panel-toggle:hover{color:#ffffff;}";
-  page += ".panel-toggle h2{flex:1;}";
-  page += ".panel-chevron{font-size:18px;color:#8ea3ba;transition:transform .18s ease;}";
-  page += ".panel.collapsed .panel-chevron{transform:rotate(-90deg);}";
-  page += ".panel-body{margin-top:12px;}";
-  page += ".panel.collapsed .panel-body{display:none;}";
-  page += ".panel h2{margin:0 0 6px 0;font-size:18px;}";
-  page += ".panel p{margin:0 0 14px 0;color:#94a3b8;font-size:13px;line-height:1.45;}";
-  page += ".grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}";
-  page += ".grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}";
-  page += ".label{display:block;font-size:13px;margin:0 0 8px 0;color:#a0aec0;font-weight:600;}";
-  page += "textarea,input,select{width:100%;border-radius:12px;border:1px solid #334155;background:#0b1220;color:#edf2f7;padding:12px;box-sizing:border-box;font:inherit;}";
-  page += "textarea{min-height:170px;resize:vertical;}";
-  page += "button{margin-top:18px;background:#38bdf8;border:none;color:#001018;padding:13px 18px;border-radius:12px;font-weight:800;cursor:pointer;font:inherit;}";
-  page += ".muted{font-size:13px;color:#94a3b8;line-height:1.45;}";
-  page += ".footer-note{margin-top:10px;font-size:12px;color:#7f92a8;}";
-  page += ".settings-block{margin-top:18px;padding-top:16px;border-top:1px solid #2b3545;}";
-  page += ".settings-block:first-of-type{margin-top:0;padding-top:0;border-top:none;}";
-  page += ".settings-title{display:block;margin:0 0 6px 0;font-size:14px;font-weight:700;color:#edf2f7;letter-spacing:.02em;}";
-  page += ".settings-desc{margin:0 0 12px 0;font-size:12px;color:#8ea3ba;line-height:1.45;}";
-  page += ".color-stack{display:grid;gap:12px;}";
-  page += ".color-row{display:grid;grid-template-columns:120px 1fr;gap:12px;align-items:center;}";
-  page += ".color-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;}";
-  page += ".color-meta .label{margin:0;color:#dbe7f5;}";
-  page += ".color-value{font-size:12px;color:#8ea3ba;white-space:nowrap;}";
-  page += ".swatch-row{display:flex;flex-wrap:wrap;gap:8px;}";
-  page += ".swatch{width:22px;height:22px;border-radius:999px;border:1px solid rgba(255,255,255,.18);cursor:pointer;position:relative;box-sizing:border-box;}";
-  page += ".swatch input{display:none;}";
-  page += ".swatch.active{box-shadow:0 0 0 2px #67e8f9, 0 0 0 5px rgba(103,232,249,.18);}";
-  page += ".swatch.active::after{content:'';position:absolute;inset:5px;border-radius:999px;border:1px solid rgba(0,16,24,.45);}";
-  page += ".timer-slot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px;}";
-  page += ".timer-slot{border:1px solid #334155;border-radius:12px;background:#0b1220;padding:10px 10px 12px 10px;}";
-  page += ".timer-slot-head{font-size:12px;color:#8ea3ba;margin-bottom:8px;font-weight:600;}";
-  page += ".timer-slot-input{display:flex;align-items:center;gap:8px;}";
-  page += ".timer-slot input{padding:10px 12px;text-align:center;font-weight:700;}";
-  page += ".timer-unit{font-size:12px;color:#8ea3ba;white-space:nowrap;}";
-  page += "@media(max-width:820px){.layout{grid-template-columns:1fr;}.grid,.grid-3,.timer-slot-grid{grid-template-columns:1fr;}.color-row{grid-template-columns:1fr;}}";
-  page += "</style></head><body><div class='wrap'>";
-  page += "<div class='hero'>";
-  page += "<h1>Deskbuddy</h1>";
-  page += "<p>Adjust notes, colors, system settings, and location from your browser.</p>";
-  page += "<div class='ip'>ESP IP: ";
-  page += WiFi.localIP().toString();
-  page += "</div>";
-  page += "<div class='footer-note' style='margin-top:12px'>Firmware ";
-  page += FIRMWARE_VERSION;
-  page += "</div></div>";
-
-  page += "<form method='POST' action='/save'>";
-  page += "<div class='layout'><div class='stack'>";
-
-  page += "<div class='panel' data-panel='notes'>";
-  page += "<button type='button' class='panel-toggle' aria-expanded='true'><h2>Notes</h2><span class='panel-chevron'>&#9662;</span></button>";
-  page += "<div class='panel-body'>";
-  page += "<p>Short notes synced to the device.</p>";
-  page += "<label class='label'>Notes</label>";
-  page += "<textarea name='notes' maxlength='700'>";
-  page += htmlEscape(notesText);
-  page += "</textarea>";
-  page += "<div class='muted'>Saved notes show up right away.</div>";
-  page += "</div></div>";
-
-  page += "<div class='panel' data-panel='theme'>";
-  page += "<button type='button' class='panel-toggle' aria-expanded='true'><h2>Theme and color</h2><span class='panel-chevron'>&#9662;</span></button>";
-  page += "<div class='panel-body'>";
-  page += "<p>Colors and visual style for the display.</p>";
-  page += "<div class='grid'>";
-
-  page += "<div style='grid-column:1 / -1;' class='color-stack'>";
-
-  page += "<div class='color-row'><div class='color-meta'><label class='label'>Accent</label><span class='color-value' id='accent-value'>";
-  page += accent;
-  page += "</span></div><div class='swatch-row'>";
-  page += "<label class='swatch" + String(accent=="standard"?" active":"") + "' style='background:" + accentPreviewCss("standard") + ";'><input type='radio' name='accent' value='standard'" + String(accent=="standard"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="ice"?" active":"") + "' style='background:" + accentPreviewCss("ice") + ";'><input type='radio' name='accent' value='ice'" + String(accent=="ice"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="white"?" active":"") + "' style='background:" + accentPreviewCss("white") + ";'><input type='radio' name='accent' value='white'" + String(accent=="white"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="cyan"?" active":"") + "' style='background:" + accentPreviewCss("cyan") + ";'><input type='radio' name='accent' value='cyan'" + String(accent=="cyan"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="mint"?" active":"") + "' style='background:" + accentPreviewCss("mint") + ";'><input type='radio' name='accent' value='mint'" + String(accent=="mint"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="green"?" active":"") + "' style='background:" + accentPreviewCss("green") + ";'><input type='radio' name='accent' value='green'" + String(accent=="green"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="blue"?" active":"") + "' style='background:" + accentPreviewCss("blue") + ";'><input type='radio' name='accent' value='blue'" + String(accent=="blue"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="purple"?" active":"") + "' style='background:" + accentPreviewCss("purple") + ";'><input type='radio' name='accent' value='purple'" + String(accent=="purple"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="pink"?" active":"") + "' style='background:" + accentPreviewCss("pink") + ";'><input type='radio' name='accent' value='pink'" + String(accent=="pink"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="orange"?" active":"") + "' style='background:" + accentPreviewCss("orange") + ";'><input type='radio' name='accent' value='orange'" + String(accent=="orange"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="amber"?" active":"") + "' style='background:" + accentPreviewCss("amber") + ";'><input type='radio' name='accent' value='amber'" + String(accent=="amber"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(accent=="red"?" active":"") + "' style='background:" + accentPreviewCss("red") + ";'><input type='radio' name='accent' value='red'" + String(accent=="red"?" checked":"") + "></label>";
-  page += "</div></div>";
-
-  page += "<div class='color-row'><div class='color-meta'><label class='label'>Text</label><span class='color-value' id='text-value'>";
-  page += txt;
-  page += "</span></div><div class='swatch-row'>";
-  page += "<label class='swatch" + String(txt=="standard"?" active":"") + "' style='background:" + accentPreviewCss("standard") + ";'><input type='radio' name='text' value='standard'" + String(txt=="standard"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="ice"?" active":"") + "' style='background:" + accentPreviewCss("ice") + ";'><input type='radio' name='text' value='ice'" + String(txt=="ice"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="white"?" active":"") + "' style='background:" + accentPreviewCss("white") + ";'><input type='radio' name='text' value='white'" + String(txt=="white"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="cyan"?" active":"") + "' style='background:" + accentPreviewCss("cyan") + ";'><input type='radio' name='text' value='cyan'" + String(txt=="cyan"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="mint"?" active":"") + "' style='background:" + accentPreviewCss("mint") + ";'><input type='radio' name='text' value='mint'" + String(txt=="mint"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="green"?" active":"") + "' style='background:" + accentPreviewCss("green") + ";'><input type='radio' name='text' value='green'" + String(txt=="green"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="blue"?" active":"") + "' style='background:" + accentPreviewCss("blue") + ";'><input type='radio' name='text' value='blue'" + String(txt=="blue"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="purple"?" active":"") + "' style='background:" + accentPreviewCss("purple") + ";'><input type='radio' name='text' value='purple'" + String(txt=="purple"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="pink"?" active":"") + "' style='background:" + accentPreviewCss("pink") + ";'><input type='radio' name='text' value='pink'" + String(txt=="pink"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="orange"?" active":"") + "' style='background:" + accentPreviewCss("orange") + ";'><input type='radio' name='text' value='orange'" + String(txt=="orange"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="amber"?" active":"") + "' style='background:" + accentPreviewCss("amber") + ";'><input type='radio' name='text' value='amber'" + String(txt=="amber"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(txt=="red"?" active":"") + "' style='background:" + accentPreviewCss("red") + ";'><input type='radio' name='text' value='red'" + String(txt=="red"?" checked":"") + "></label>";
-  page += "</div></div>";
-
-  page += "<div class='color-row'><div class='color-meta'><label class='label'>Theme</label><span class='color-value' id='bg-value'>";
-  page += bg;
-  page += "</span></div><div class='swatch-row'>";
-  page += "<label class='swatch" + String(bg=="slate"?" active":"") + "' style='background:" + themePreviewCss("slate") + ";'><input type='radio' name='bg' value='slate'" + String(bg=="slate"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(bg=="deep"?" active":"") + "' style='background:" + themePreviewCss("deep") + ";'><input type='radio' name='bg' value='deep'" + String(bg=="deep"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(bg=="nordic"?" active":"") + "' style='background:" + themePreviewCss("nordic") + ";'><input type='radio' name='bg' value='nordic'" + String(bg=="nordic"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(bg=="forest"?" active":"") + "' style='background:" + themePreviewCss("forest") + ";'><input type='radio' name='bg' value='forest'" + String(bg=="forest"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(bg=="coffee"?" active":"") + "' style='background:" + themePreviewCss("coffee") + ";'><input type='radio' name='bg' value='coffee'" + String(bg=="coffee"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(bg=="soft"?" active":"") + "' style='background:" + themePreviewCss("soft") + ";'><input type='radio' name='bg' value='soft'" + String(bg=="soft"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(bg=="midnight"?" active":"") + "' style='background:" + themePreviewCss("midnight") + ";'><input type='radio' name='bg' value='midnight'" + String(bg=="midnight"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(bg=="graphite"?" active":"") + "' style='background:" + themePreviewCss("graphite") + ";'><input type='radio' name='bg' value='graphite'" + String(bg=="graphite"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(bg=="garnet"?" active":"") + "' style='background:" + themePreviewCss("garnet") + ";'><input type='radio' name='bg' value='garnet'" + String(bg=="garnet"?" checked":"") + "></label>";
-  page += "<label class='swatch" + String(bg=="ochre"?" active":"") + "' style='background:" + themePreviewCss("ochre") + ";'><input type='radio' name='bg' value='ochre'" + String(bg=="ochre"?" checked":"") + "></label>";
-  page += "</div></div>";
-
-  page += "</div>";
-
-  page += "</div></div></div>";
-
-  page += "<div class='panel' data-panel='settings'>";
-  page += "<button type='button' class='panel-toggle' aria-expanded='true'><h2>Settings</h2><span class='panel-chevron'>&#9662;</span></button>";
-  page += "<div class='panel-body'>";
-  page += "<p>Core behavior and timer setup.</p>";
-  page += "<div class='settings-block'>";
-  page += "<span class='settings-title'>General</span>";
-  page += "<div class='grid'>";
-  page += "<div><label class='label'>Buddy nickname</label><input name='nickname' maxlength='24' value='" + htmlEscape(nickname) + "'></div>";
-  page += "<div><label class='label'>Auto sleep interval</label><select name='sleepMin'>";
-  page += "<option value='0'"  + String(sleepIntervalMin==0?" selected":"")  + ">Never</option>";
-  page += "<option value='1'"  + String(sleepIntervalMin==1?" selected":"")  + ">1 minute</option>";
-  page += "<option value='5'"  + String(sleepIntervalMin==5?" selected":"")  + ">5 minutes</option>";
-  page += "<option value='10'" + String(sleepIntervalMin==10?" selected":"") + ">10 minutes</option>";
-  page += "<option value='30'" + String(sleepIntervalMin==30?" selected":"") + ">30 minutes</option>";
-  page += "<option value='60'" + String(sleepIntervalMin==60?" selected":"") + ">1 hour</option>";
-  page += "</select><div class='muted' style='margin-top:8px;'>Idle dims backlight only. Full black sleep: moon button on device.</div></div>";
-  page += "<div><label class='label'>Measurement system</label><select name='units'>";
-  page += "<option value='metric'"   + String(units=="metric"?" selected":"")   + ">Celsius / mm</option>";
-  page += "<option value='imperial'" + String(units=="imperial"?" selected":"") + ">Fahrenheit / inches</option>";
-  page += "</select></div>";
-  page += "<div><label class='label'>Date format</label><select name='region'>";
-  page += "<option value='europe'" + String(region=="europe"?" selected":"") + ">European: dd.mm.yyyy</option>";
-  page += "<option value='us'" + String(region=="us"?" selected":"") + ">US: mm/dd/yyyy</option>";
-  page += "</select></div>";
-  page += "</div>";
-  page += "</div>";
-  page += "<div class='settings-block'><span class='settings-title'>Timer</span><div class='settings-desc'>Choose the six quick timers shown in the popup menu.</div><div class='timer-slot-grid'>";
-  for (int i = 0; i < 6; i++) {
-    page += "<div class='timer-slot'><div class='timer-slot-head'>Slot " + String(i + 1) + "</div><div class='timer-slot-input'><input type='number' min='1' max='180' name='timer" + String(i) + "' value='" + String(timerPresetMin[i]) + "'><span class='timer-unit'>min</span></div></div>";
-  }
-  page += "</div>";
-  page += "<div style='margin-top:14px;'><span class='settings-title'>Alert behavior</span><label style='display:flex;align-items:center;gap:10px;color:#edf2f7;'><input type='checkbox' name='flashMode' value='1'" + String(flashMode ? " checked" : "") + " style='width:auto;'>Flash screen when timer ends</label></div></div>";
-  page += "<div class='settings-block'><span class='settings-title'>Location</span><div class='settings-desc'>Used for weather data and sun times.</div><div class='grid-3'>";
-  page += "<div><label class='label'>Location name</label><input name='locname' value='" + htmlEscape(locationName) + "'></div>";
-  page += "<div><label class='label'>Latitude</label><input name='lat' value='" + String(LAT, 6) + "'></div>";
-  page += "<div><label class='label'>Longitude</label><input name='lng' value='" + String(LNG, 6) + "'></div>";
-  page += "</div><div class='footer-note'>Example Berlin: latitude 52.5200, longitude 13.4050.</div></div>";
-  page += "</div></div>";
-
-  page += "<div class='panel' data-panel='widgets'>";
-  page += "<button type='button' class='panel-toggle' aria-expanded='true'><h2>Widget Customization</h2><span class='panel-chevron'>&#9662;</span></button>";
-  page += "<div class='panel-body'>";
-  page += "<p>Choose which widgets appear in the four Home slots below the clock card.</p>";
-  page += "<div class='grid'>";
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    page += "<div><label class='label'>";
-    page += homeSlotLabel(i);
-    page += "</label><select name='homeSlot";
-    page += String(i);
-    page += "'>";
-    appendHomeWidgetOptions(page, homeSlotKeys[i]);
-    page += "</select></div>";
-  }
-  page += "</div>";
-  page += "</div></div>";
-
-  page += "</div><div class='stack'>";
-
-  page += "<button type='submit'>Save to Deskbuddy</button>";
-  page += "</div></div></form>";
-  page += "<script>";
-  page += "var colorNames={accent:{standard:'Standard',ice:'Ice',white:'White',cyan:'Cyan',mint:'Mint',green:'Green',blue:'Blue',purple:'Purple',pink:'Pink',orange:'Orange',amber:'Amber',red:'Red'},text:{standard:'Standard',ice:'Ice',white:'White',cyan:'Cyan',mint:'Mint',green:'Green',blue:'Blue',purple:'Purple',pink:'Pink',orange:'Orange',amber:'Amber',red:'Red'},bg:{slate:'Slate',deep:'Deep black',nordic:'Nordic blue',forest:'Forest',coffee:'Coffee',soft:'Soft dark',midnight:'Midnight',graphite:'Graphite',garnet:'Garnet',ochre:'Ochre'}};";
-  page += "var panelStorageKey='deskbuddy-panel-state-v1';";
-  page += "document.querySelectorAll('.swatch input').forEach(function(input){";
-  page += "input.addEventListener('change',function(){";
-  page += "document.querySelectorAll('.swatch input[name=\"'+input.name+'\"]').forEach(function(peer){";
-  page += "peer.closest('.swatch').classList.toggle('active', peer.checked);";
-  page += "});";
-  page += "var valueEl=document.getElementById(input.name+'-value');";
-  page += "if(valueEl&&colorNames[input.name]&&colorNames[input.name][input.value]){valueEl.textContent=colorNames[input.name][input.value];}";
-  page += "});";
-  page += "});";
-  page += "function readPanelState(){try{return JSON.parse(localStorage.getItem(panelStorageKey)||'{}');}catch(e){return {};}}";
-  page += "function writePanelState(state){localStorage.setItem(panelStorageKey,JSON.stringify(state));}";
-  page += "function applyPanelState(panel,collapsed){panel.classList.toggle('collapsed',collapsed);var btn=panel.querySelector('.panel-toggle');if(btn){btn.setAttribute('aria-expanded',collapsed?'false':'true');}}";
-  page += "var savedPanelState=readPanelState();";
-  page += "document.querySelectorAll('.panel[data-panel]').forEach(function(panel){";
-  page += "var panelId=panel.getAttribute('data-panel');";
-  page += "if(Object.prototype.hasOwnProperty.call(savedPanelState,panelId)){applyPanelState(panel,!!savedPanelState[panelId]);}";
-  page += "});";
-  page += "document.querySelectorAll('.panel-toggle').forEach(function(btn){";
-  page += "btn.addEventListener('click',function(){";
-  page += "var panel=btn.closest('.panel');";
-  page += "var collapsed=!panel.classList.contains('collapsed');";
-  page += "applyPanelState(panel,collapsed);";
-  page += "var state=readPanelState();";
-  page += "var panelId=panel.getAttribute('data-panel');";
-  page += "if(panelId){state[panelId]=collapsed;writePanelState(state);}";
-  page += "});";
-  page += "});";
-  page += "</script>";
-  page += "</div></body></html>";
-
-  server.send(200, "text/html; charset=utf-8", page);
-}
-
-void handleSave() {
-  String newNotes  = server.hasArg("notes") ? server.arg("notes") : notesText;
-  String newAccent = server.hasArg("accent") ? server.arg("accent") : "cyan";
-  String newBg     = server.hasArg("bg") ? server.arg("bg") : "slate";
-  String newText   = server.hasArg("text") ? server.arg("text") : "standard";
-  String newUnits  = server.hasArg("units") ? server.arg("units") : "metric";
-  String newRegion = server.hasArg("region") ? server.arg("region") : "europe";
-  String newLoc    = server.hasArg("locname") ? server.arg("locname") : locationName;
-  String newNickname = server.hasArg("nickname") ? server.arg("nickname") : buddyNickname;
-  HomeWidgetType newHomeSlots[HOME_SLOT_COUNT];
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    String key = String("homeSlot") + String(i);
-    String currentKey = homeWidgetKey(homeWidgetSlots[i]);
-    newHomeSlots[i] = homeWidgetFromKey(server.hasArg(key) ? server.arg(key) : currentKey);
-  }
-
-  float newLat = server.hasArg("lat") ? server.arg("lat").toFloat() : LAT;
-  float newLng = server.hasArg("lng") ? server.arg("lng").toFloat() : LNG;
-
-  newNotes.trim();
-  newLoc.trim();
-  newNickname.trim();
-
-  if (newNotes.length() == 0) newNotes = "Henuz not yok.";
-  if (newNotes.length() > 700) newNotes = newNotes.substring(0, 700);
-  if (newLoc.length() == 0) newLoc = "Unknown";
-  if (newNickname.length() > 24) newNickname = newNickname.substring(0, 24);
-  if (newUnits != "metric" && newUnits != "imperial") newUnits = "metric";
-  if (newRegion != "europe" && newRegion != "us") newRegion = "europe";
-
-  int newSleepMin = server.hasArg("sleepMin") ? server.arg("sleepMin").toInt() : sleepIntervalMin;
-  sleepIntervalMin = constrain(newSleepMin, 0, 120);
-  bool newFlashMode = server.hasArg("flashMode");
-
-  bool locationChanged =
-    (fabsf(newLat - LAT) > 0.0001f) ||
-    (fabsf(newLng - LNG) > 0.0001f) ||
-    (newLoc != locationName);
-
-  notesText = newNotes;
-  buddyNickname = newNickname;
-  locationName = newLoc;
-  LAT = newLat;
-  LNG = newLng;
-  unitKey = newUnits;
-  regionFormatKey = newRegion;
-  flashModeEnabled = newFlashMode;
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    homeWidgetSlots[i] = newHomeSlots[i];
-  }
-
-  for (int i = 0; i < 6; i++) {
-    String key = String("timer") + String(i);
-    int currentValue = timerPresetMin[i];
-    int nextValue = server.hasArg(key) ? server.arg(key).toInt() : currentValue;
-    timerPresetMin[i] = sanitizeTimerMinutes(nextValue);
-  }
-
-  prefs.putString("notes", notesText);
-  prefs.putString("accent", newAccent);
-  prefs.putString("bg", newBg);
-  prefs.putString("text", newText);
-  prefs.putString("units", unitKey);
-  prefs.putString("region", regionFormatKey);
-  prefs.putString("nickname", buddyNickname);
-  prefs.putString("locname", locationName);
-  prefs.putFloat("lat", LAT);
-  prefs.putFloat("lng", LNG);
-  prefs.putInt("sleepMin", sleepIntervalMin);
-  prefs.putBool("flashMode", flashModeEnabled);
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    String key = String("homeSlot") + String(i);
-    prefs.putString(key.c_str(), homeWidgetKey(homeWidgetSlots[i]));
-  }
-  for (int i = 0; i < 6; i++) {
-    String key = String("timer") + String(i);
-    prefs.putInt(key.c_str(), timerPresetMin[i]);
-  }
-
-  applyThemeByKey(newAccent, newBg);
-  applyTextColorByKey(newText);
-  restoreSleepAwareBacklight();
-
-  notesDirty = true;
-  pageDirty = true;
-  dataDirty = true;
-
-  cacheClock = "";
-  cacheHomeEmpty1 = "";
-  cacheHomeEmpty2 = "";
-  cacheFocusTimer = "";
-  cacheTimerMenu = "";
-  cacheTimerDone = "";
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    cacheHomeSlots[i] = "";
-  }
-
-  lastTempText = "";
-  lastRainText = "";
-  lastKpText = "";
-  lastKpLevelText = "";
-  lastWindText = "";
-  lastWindDirText = "";
-  lastNextSunLabel = "";
-  lastNextSunTime = "";
-  lastUptimeText = "";
-
-  if (locationChanged) resetDataCaches();
-
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void setupWebServer() {
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/save", HTTP_POST, handleSave);
-  server.begin();
-}
 
 // =========================================================
 // SETUP / LOOP
