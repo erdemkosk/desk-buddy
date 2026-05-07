@@ -146,7 +146,8 @@ static int topBarDimBtnX() { return topBarMoonBtnX() - TOPBAR_BTN_SZ - TOPBAR_BT
 /** Firmware semver; ust bardaki uyku/onleme tuslarinin solunda gosterilir. */
 static const char* FIRMWARE_VERSION = "v1.0.0";
 
-static int topBarVersionRightX() { return topBarDimBtnX() - 6; }
+/** Saga hizali surum yazisinin sag kenari ile parlaklik butonu solu: iki ara bosluk (TOPBAR_BTN_GAP x2). */
+static int topBarVersionRightX() { return topBarDimBtnX() - 2 * TOPBAR_BTN_GAP; }
 
 const int HOME_GRID_Y1 = 120;
 const int HOME_GRID_Y2 = 198;
