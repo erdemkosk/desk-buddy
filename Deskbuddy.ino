@@ -139,6 +139,15 @@ HomeWidgetType homeWidgetSlots[HOME_SLOT_COUNT] = {
 
 String cacheHomeSlots[HOME_SLOT_COUNT];
 
+bool isWidgetActive(HomeWidgetType type) {
+  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+    if (homeWidgetSlots[i] == type) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // =========================================================
 // STATE
 // =========================================================
@@ -1771,7 +1780,7 @@ void networkFetchTask(void *pvParameters) {
       time_t nowT = time(nullptr);
 
       // Spotify Data
-      if (spotifyUrl.length() >= 10) {
+      if (isWidgetActive(HOME_WIDGET_SPOTIFY) && spotifyUrl.length() >= 10) {
         time_t lastS = 0;
         if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
           lastS = lastSpotifyFetch;
@@ -1783,7 +1792,7 @@ void networkFetchTask(void *pvParameters) {
       }
 
       // Calendar Data
-      if (calendarUrl.length() >= 10) {
+      if (isWidgetActive(HOME_WIDGET_CALENDAR) && calendarUrl.length() >= 10) {
         time_t lastC = 0;
         if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
           lastC = lastCalendarFetch;
@@ -3574,8 +3583,10 @@ void updateWiFiConnectionState() {
     wifiConnectInProgress = false;
     ensureSunTimesForToday();
     ensureWeather();
-    ensureKpIndex();
-    ensureFinance();
+    if (isWidgetActive(HOME_WIDGET_KP))
+      ensureKpIndex();
+    if (isWidgetActive(HOME_WIDGET_FINANCE))
+      ensureFinance();
     dataDirty = true;
     pageDirty = true;
     return;
@@ -3782,8 +3793,10 @@ void loop() {
     lastDataTick = millis();
     ensureSunTimesForToday();
     ensureWeather();
-    ensureKpIndex();
-    ensureFinance();
+    if (isWidgetActive(HOME_WIDGET_KP))
+      ensureKpIndex();
+    if (isWidgetActive(HOME_WIDGET_FINANCE))
+      ensureFinance();
   }
 
   if (millis() - lastClockTick >= CLOCK_TICK_MS) {
