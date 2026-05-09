@@ -3887,6 +3887,9 @@ void updateMeetingFlashState() {
       wasMeetingFlashing = false;
       setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
     }
+  }
+}
+
 void hwSetupScrollArea(uint16_t tfa, uint16_t vsa, uint16_t bfa) {
   tft.writecommand(0x33);
   tft.writedata(tfa >> 8);
