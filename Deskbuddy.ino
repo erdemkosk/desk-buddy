@@ -208,6 +208,11 @@ time_t lastSpotifyFetch = 0;
 const uint32_t SPOTIFY_INTERVAL_SEC = 15;
 SemaphoreHandle_t spotifyMutex = NULL;
 
+String githubUser = "";
+uint8_t githubLevels[14] = {0};
+time_t lastGithubFetch = 0;
+SemaphoreHandle_t githubMutex = NULL;
+
 const char *homeWidgetKey(HomeWidgetType type) {
   switch (type) {
   case HOME_WIDGET_HUMIDITY:
@@ -236,6 +241,8 @@ const char *homeWidgetKey(HomeWidgetType type) {
     return "calendar";
   case HOME_WIDGET_SPOTIFY:
     return "spotify";
+  case HOME_WIDGET_GITHUB:
+    return "github";
   default:
     return "humidity";
   }
@@ -269,6 +276,8 @@ const char *homeWidgetLabel(HomeWidgetType type) {
     return "Takvim";
   case HOME_WIDGET_SPOTIFY:
     return "Spotify";
+  case HOME_WIDGET_GITHUB:
+    return "GitHub";
   default:
     return "Nem";
   }
@@ -301,6 +310,8 @@ HomeWidgetType homeWidgetFromKey(const String &key) {
     return HOME_WIDGET_CALENDAR;
   if (key == "spotify")
     return HOME_WIDGET_SPOTIFY;
+  if (key == "github")
+    return HOME_WIDGET_GITHUB;
   return HOME_WIDGET_HUMIDITY;
 }
 
@@ -335,7 +346,7 @@ void appendHomeWidgetOptions(String &page, const String &selectedKey) {
       HOME_WIDGET_OUTDOOR,  HOME_WIDGET_KP,    HOME_WIDGET_UV,
       HOME_WIDGET_WIND,     HOME_WIDGET_SUN,   HOME_WIDGET_FINANCE,
       HOME_WIDGET_BUDDY,    HOME_WIDGET_NOTES, HOME_WIDGET_CALENDAR,
-      HOME_WIDGET_SPOTIFY};
+      HOME_WIDGET_SPOTIFY,  HOME_WIDGET_GITHUB};
 
   for (HomeWidgetType type : types) {
     const char *key = homeWidgetKey(type);
@@ -1241,6 +1252,7 @@ void loadStoredSettings() {
   notesText = prefs.getString("notes", "Henuz not yok.");
   calendarUrl = prefs.getString("calUrl", "");
   spotifyUrl = prefs.getString("spotifyUrl", "");
+  githubUser = prefs.getString("githubUser", "");
   buddyNickname = prefs.getString("nickname", "");
   locationName = prefs.getString("locname", "Berlin");
   LAT = prefs.getFloat("lat", 52.5200f);
@@ -1774,6 +1786,58 @@ static bool fetchSpotifyData() {
   return got;
 }
 
+static bool fetchGithubData() {
+  if (WiFi.status() != WL_CONNECTED || githubUser.length() < 2)
+    return false;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(15000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+  bool got = false;
+  String url = "https://github-contributions-api.jogruber.de/v4/" + githubUser + "?y=last";
+  if (http.begin(client, url)) {
+    if (http.GET() == 200) {
+      WiFiClient *stream = http.getStreamPtr();
+      uint8_t tempLevels[14] = {0};
+      int count = 0;
+
+      // Extract the last 14 \"level\":X occurrences
+      while (stream->find("\"level\":")) {
+        int level = stream->parseInt();
+        tempLevels[count % 14] = (uint8_t)level;
+        count++;
+      }
+      
+      if (count > 0) {
+        if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
+          // Unwrap the circular buffer so githubLevels[13] is the most recent day
+          for (int i = 0; i < 14; i++) {
+            githubLevels[i] = tempLevels[(count + i) % 14];
+          }
+          lastGithubFetch = time(nullptr);
+          xSemaphoreGive(githubMutex);
+        }
+        got = true;
+        dataDirty = true;
+      }
+    }
+    http.end();
+  }
+
+  if (got || githubUser.length() >= 2) {
+    if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
+      lastGithubFetch = time(nullptr);
+      lastSyncTime = lastGithubFetch;
+      xSemaphoreGive(githubMutex);
+    }
+  }
+  return got;
+}
+
+
 void networkFetchTask(void *pvParameters) {
   while (true) {
     if (WiFi.status() == WL_CONNECTED) {
@@ -1800,6 +1864,19 @@ void networkFetchTask(void *pvParameters) {
         }
         if (lastC == 0 || (nowT - lastC) > CALENDAR_INTERVAL_SEC) {
           fetchCalendarData();
+        }
+      }
+
+      // GitHub Data
+      if (isWidgetActive(HOME_WIDGET_GITHUB) && githubUser.length() >= 2) {
+        time_t lastG = 0;
+        if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
+          lastG = lastGithubFetch;
+          xSemaphoreGive(githubMutex);
+        }
+        // Fetch every 1 hour (3600 sec)
+        if (lastG == 0 || (nowT - lastG) > 3600) {
+          fetchGithubData();
         }
       }
     }
@@ -2265,73 +2342,103 @@ static WxKind wxKindFromCode(int code, int isDay) {
 }
 
 void drawWxCloudBlob(TFT_eSPI &g, int cx, int cy, uint16_t c) {
-  g.fillCircle(cx - 8, cy + 2, 7, c);
-  g.fillCircle(cx + 2, cy, 8, c);
-  g.fillCircle(cx + 12, cy + 3, 6, c);
+  g.fillCircle(cx - 8, cy + 3, 7, c);
+  g.fillCircle(cx, cy, 9, c);
+  g.fillCircle(cx + 9, cy + 4, 6, c);
+  g.fillRect(cx - 10, cy + 3, 21, 7, c);
 }
 
 /** Ortak palet: accent ana renk, dim ikincil. Merkez (cx, cy), ~28px. */
 void drawWxConditionIcon(TFT_eSPI &g, int cx, int cy, WxKind k, uint16_t accent,
                          uint16_t dim, uint16_t panelBg) {
+  uint16_t colSun = g.color565(255, 215, 0);         // Canlı Sarι
+  uint16_t colMoon = g.color565(210, 225, 240);      // Hafif Mavi/Beyaz
+  uint16_t colCloud = g.color565(230, 235, 240);     // Parlak Bulut
+  uint16_t colCloudDark = g.color565(130, 145, 160); // Koyu/Yağmur Bulutu
+  uint16_t colRain = g.color565(40, 170, 255);       // Yağmur Mavisi
+  uint16_t colSnow = g.color565(255, 255, 255);      // Kar Beyazı
+  uint16_t colLightning = g.color565(255, 200, 0);   // Şimşek Sarısı
+
   switch (k) {
   case WX_CLEAR_DAY:
-    g.fillCircle(cx, cy, 4, accent);
-    g.drawLine(cx, cy - 9, cx, cy - 7, accent);
-    g.drawLine(cx, cy + 7, cx, cy + 9, accent);
-    g.drawLine(cx - 9, cy, cx - 7, cy, accent);
-    g.drawLine(cx + 7, cy, cx + 9, cy, accent);
-    g.drawLine(cx - 6, cy - 6, cx - 5, cy - 5, accent);
-    g.drawLine(cx + 5, cy - 5, cx + 6, cy - 6, accent);
-    g.drawLine(cx - 6, cy + 6, cx - 5, cy + 5, accent);
-    g.drawLine(cx + 5, cy + 5, cx + 6, cy + 6, accent);
+    g.fillCircle(cx, cy, 7, colSun);
+    g.fillRect(cx - 1, cy - 14, 3, 4, colSun);
+    g.fillRect(cx - 1, cy + 11, 3, 4, colSun);
+    g.fillRect(cx - 14, cy - 1, 4, 3, colSun);
+    g.fillRect(cx + 11, cy - 1, 4, 3, colSun);
+    for(int i=-1; i<=1; i++) {
+      g.drawLine(cx - 8 + i, cy - 8, cx - 11 + i, cy - 11, colSun);
+      g.drawLine(cx + 8 + i, cy - 8, cx + 11 + i, cy - 11, colSun);
+      g.drawLine(cx - 8 + i, cy + 8, cx - 11 + i, cy + 11, colSun);
+      g.drawLine(cx + 8 + i, cy + 8, cx + 11 + i, cy + 11, colSun);
+    }
     break;
+
   case WX_CLEAR_NIGHT:
-    g.fillCircle(cx, cy, 5, accent);
-    g.fillCircle(cx + 3, cy - 2, 5, panelBg);
+    g.fillCircle(cx, cy, 8, colMoon);
+    g.fillCircle(cx + 4, cy - 3, 8, panelBg);
+    g.drawLine(cx - 11, cy - 5, cx - 11, cy - 7, colMoon);
+    g.drawLine(cx - 12, cy - 6, cx - 10, cy - 6, colMoon);
+    g.drawPixel(cx + 8, cy + 8, colMoon);
+    g.drawPixel(cx - 2, cy + 11, colMoon);
     break;
-  case WX_PARTLY: {
-    drawWxCloudBlob(g, cx + 4, cy + 2, dim);
-    g.fillCircle(cx - 6, cy - 6, 4, accent);
-    g.drawLine(cx - 6, cy - 13, cx - 6, cy - 11, accent);
-    g.drawLine(cx - 13, cy - 6, cx - 11, cy - 6, accent);
+
+  case WX_PARTLY:
+    g.fillCircle(cx - 5, cy - 5, 6, colSun);
+    g.fillRect(cx - 6, cy - 14, 3, 3, colSun);
+    g.fillRect(cx - 14, cy - 6, 3, 3, colSun);
+    for(int i=0; i<2; i++) {
+      g.drawLine(cx - 10 + i, cy - 10, cx - 13 + i, cy - 13, colSun);
+    }
+    drawWxCloudBlob(g, cx + 2, cy + 2, colCloud);
     break;
-  }
+
   case WX_CLOUD:
-    drawWxCloudBlob(g, cx, cy, accent);
+    g.fillCircle(cx - 7, cy - 4, 5, colCloudDark);
+    g.fillCircle(cx + 7, cy - 3, 4, colCloudDark);
+    g.fillRect(cx - 7, cy - 4, 14, 5, colCloudDark);
+    drawWxCloudBlob(g, cx, cy + 2, colCloud);
     break;
+
   case WX_FOG:
-    drawWxCloudBlob(g, cx, cy - 3, dim);
-    g.drawFastHLine(cx - 14, cy + 8, 10, accent);
-    g.drawFastHLine(cx - 2, cy + 11, 14, accent);
-    g.drawFastHLine(cx - 10, cy + 14, 12, accent);
+    drawWxCloudBlob(g, cx, cy - 4, colCloudDark);
+    g.fillRoundRect(cx - 12, cy + 8, 24, 3, 1, colCloud);
+    g.fillRoundRect(cx - 8, cy + 13, 16, 3, 1, colCloud);
     break;
+
   case WX_DRIZZLE:
   case WX_RAIN:
   case WX_SHOWER:
-    drawWxCloudBlob(g, cx, cy - 4, dim);
-    g.drawFastVLine(cx - 6, cy + 6, 8, accent);
-    g.drawFastVLine(cx + 2, cy + 5, 10, accent);
-    g.drawFastVLine(cx + 8, cy + 7, 7, accent);
+    drawWxCloudBlob(g, cx, cy - 4, colCloudDark);
+    for(int i=0; i<2; i++) {
+        g.drawLine(cx - 7 + i, cy + 6, cx - 10 + i, cy + 12, colRain);
+        g.drawLine(cx + i, cy + 6, cx - 3 + i, cy + 14, colRain);
+        g.drawLine(cx + 7 + i, cy + 6, cx + 4 + i, cy + 11, colRain);
+    }
     break;
+
   case WX_SNOW:
-    drawWxCloudBlob(g, cx, cy - 4, dim);
-    g.drawCircle(cx - 6, cy + 8, 2, accent);
-    g.drawCircle(cx + 2, cy + 10, 2, accent);
-    g.drawCircle(cx + 8, cy + 7, 2, accent);
+    drawWxCloudBlob(g, cx, cy - 4, colCloudDark);
+    g.fillCircle(cx - 6, cy + 9, 2, colSnow);
+    g.fillCircle(cx + 1, cy + 13, 2, colSnow);
+    g.fillCircle(cx + 8, cy + 8, 2, colSnow);
     break;
+
   case WX_THUNDER:
-    drawWxCloudBlob(g, cx, cy - 4, dim);
-    g.drawLine(cx - 1, cy + 2, cx - 6, cy + 12, accent);
-    g.drawLine(cx - 6, cy + 12, cx + 2, cy + 12, accent);
-    g.drawLine(cx + 2, cy + 12, cx - 4, cy + 20, accent);
+    drawWxCloudBlob(g, cx, cy - 5, colCloudDark);
+    for(int i=0; i<3; i++) {
+        g.drawLine(cx - 1 + i, cy + 1, cx - 6 + i, cy + 8, colLightning);
+        g.drawLine(cx - 6 + i, cy + 8, cx + 3 + i, cy + 8, colLightning);
+        g.drawLine(cx + 3 + i, cy + 8, cx - 3 + i, cy + 17, colLightning);
+    }
     break;
-  default: {
+
+  default:
     g.setTextDatum(MC_DATUM);
     g.setTextColor(dim, panelBg);
     g.drawString("?", cx, cy, 2);
     g.setTextDatum(TL_DATUM);
     break;
-  }
   }
 }
 
@@ -2841,6 +2948,57 @@ void drawCalendarHomeWidget(int x, int y, int w, int h, String &cache,
                                localTitle);
 }
 
+void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
+                          bool force = false) {
+  uint8_t localLevels[14] = {0};
+  if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
+    memcpy(localLevels, githubLevels, 14);
+    xSemaphoreGive(githubMutex);
+  }
+
+  String combined = "";
+  for (int i = 0; i < 14; i++)
+    combined += String(localLevels[i]) + ",";
+  combined += String(COL_PANEL) + "|" + String(COL_TEXT);
+  if (!force && cache == combined)
+    return;
+  cache = combined;
+
+  makeSpriteCard(sprSmall, w, h, false);
+
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("GitHub", 10, 2, 2);
+
+  int bw = 10;
+  int gap = 2;
+  int totalW = 7 * bw + 6 * gap;
+  int sx = (w - totalW) / 2;
+  int sy1 = 20;
+
+  for (int i = 0; i < 14; i++) {
+    uint8_t lvl = localLevels[i];
+    uint16_t col = COL_STROKE;
+    if (lvl == 0)
+      col = sprSmall.color565(180, 50, 50); // Red for idle
+    else if (lvl == 1)
+      col = sprSmall.color565(14, 68, 41); // GitHub green 1
+    else if (lvl == 2)
+      col = sprSmall.color565(0, 109, 50); // GitHub green 2
+    else if (lvl == 3)
+      col = sprSmall.color565(38, 166, 65); // GitHub green 3
+    else if (lvl >= 4)
+      col = sprSmall.color565(57, 211, 83); // GitHub green 4
+
+    int row = i / 7;
+    int colIdx = i % 7;
+    sprSmall.fillRoundRect(sx + colIdx * (bw + gap), sy1 + row * (bw + gap), bw,
+                           bw, 2, col);
+  }
+
+  pushSpriteAndDelete(sprSmall, x, y);
+}
+
 void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
                            bool force = false) {
   String localSong = "Baglanti Bekleniyor";
@@ -2963,6 +3121,9 @@ void drawHomeSlotWidget(int slot, bool force = false) {
     break;
   case HOME_WIDGET_SPOTIFY:
     drawSpotifyHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    break;
+  case HOME_WIDGET_GITHUB:
+    drawGithubHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
     break;
   }
 }
@@ -3670,7 +3831,8 @@ void setup() {
 
   spotifyMutex = xSemaphoreCreateMutex();
   calendarMutex = xSemaphoreCreateMutex();
-  if (spotifyMutex || calendarMutex) {
+  githubMutex = xSemaphoreCreateMutex();
+  if (spotifyMutex || calendarMutex || githubMutex) {
     xTaskCreatePinnedToCore(networkFetchTask, "NetworkTask", 6144, NULL, 1,
                             NULL, 0);
   }
@@ -3726,6 +3888,31 @@ void updateMeetingFlashState() {
       setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
     }
   }
+}
+
+void animatePageTransition(Page oldP, Page newP) {
+  bool slideUp = (newP > oldP);
+  const int tfa = TOPBAR_H;
+  const int vsa = SCREEN_H - TOPBAR_H - NAV_H;
+  const int bfa = NAV_H;
+
+  tft.setupScrollArea(tfa, vsa, bfa);
+
+  int step = 11; // 242 is evenly divisible by 11 (22 frames)
+  for (int i = 0; i <= vsa; i += step) {
+    if (i == 0) continue;
+    if (slideUp) {
+      tft.scrollTo(i);
+      tft.fillRect(0, tfa + i - step, SCREEN_W, step, COL_BG);
+    } else {
+      tft.scrollTo(vsa - i);
+      tft.fillRect(0, tfa + vsa - i, SCREEN_W, step, COL_BG);
+    }
+    delay(4);
+  }
+
+  tft.scrollTo(0);
+  tft.setupScrollArea(0, SCREEN_H, 0);
 }
 
 void loop() {
@@ -3806,6 +3993,9 @@ void loop() {
   }
 
   if (pageDirty || lastDrawnPage != currentPage) {
+    if (lastDrawnPage != currentPage && lastDrawnPage != (Page)-1) {
+      animatePageTransition(lastDrawnPage, currentPage);
+    }
     drawCurrentPageFull();
     updateCurrentPageDynamic();
     pageDirty = false;

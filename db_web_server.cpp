@@ -47,6 +47,9 @@ extern time_t lastCalendarFetch;
 extern String spotifyUrl;
 extern time_t lastSpotifyFetch;
 
+extern String githubUser;
+extern time_t lastGithubFetch;
+
 extern bool notesDirty;
 extern bool pageDirty;
 extern bool dataDirty;
@@ -635,6 +638,18 @@ static void handleRoot() {
   page += "</ol></details>";
   page += "</div></div>";
 
+  page += "<div class='panel' data-panel='github'>";
+  page += "<button type='button' class='panel-toggle' "
+          "aria-expanded='true'><h2>GitHub Contributions</h2><span "
+          "class='panel-chevron'>&#9662;</span></button>";
+  page += "<div class='panel-body'>";
+  page += "<p>GitHub katkı (commit) geçmişinizi ekranda görmek için kullanıcı adınızı girin.</p>";
+  page += "<label class='label'>GitHub Username</label>";
+  page += "<input type='text' name='githubUser' value='" +
+          htmlEscape(githubUser) + "'>";
+  page += "<div class='muted'>Sadece kullanıcı adını girin (Örnek: octocat).</div>";
+  page += "</div></div>";
+
   page += "<div class='panel' data-panel='widgets'>";
   page += "<button type='button' class='panel-toggle' "
           "aria-expanded='true'><h2>Widget Customization</h2><span "
@@ -734,6 +749,9 @@ static void handleSave() {
   String newSpotifyUrl =
       server.hasArg("spotifyUrl") ? server.arg("spotifyUrl") : spotifyUrl;
   newSpotifyUrl.trim();
+  String newGithubUser =
+      server.hasArg("githubUser") ? server.arg("githubUser") : githubUser;
+  newGithubUser.trim();
   HomeWidgetType newHomeSlots[HOME_SLOT_COUNT];
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     String key = String("homeSlot") + String(i);
@@ -782,6 +800,7 @@ static void handleSave() {
   LNG = newLng;
   calendarUrl = newCalUrl;
   spotifyUrl = newSpotifyUrl;
+  githubUser = newGithubUser;
   unitKey = newUnits;
   regionFormatKey = newRegion;
   flashModeEnabled = newFlashMode;
@@ -810,6 +829,7 @@ static void handleSave() {
   prefs.putBool("flashMode", flashModeEnabled);
   prefs.putString("calUrl", calendarUrl);
   prefs.putString("spotifyUrl", spotifyUrl);
+  prefs.putString("githubUser", githubUser);
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     String key = String("homeSlot") + String(i);
     prefs.putString(key.c_str(), homeWidgetKey(homeWidgetSlots[i]));
@@ -825,6 +845,7 @@ static void handleSave() {
 
   lastCalendarFetch = 0;
   lastSpotifyFetch = 0;
+  lastGithubFetch = 0;
 
   notesDirty = true;
   pageDirty = true;
