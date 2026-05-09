@@ -2810,7 +2810,7 @@ void drawWeatherStyleMetricSprite(int x, int y, int w, int h, const char *label,
 
   if (detail.length() > 0) {
     sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
-    sprSmall.drawString(detail, 10, 52, 1);
+    sprSmall.drawString(detail, 10, 58, 1); // 52'den 58'e cekildi (Daha iyi bosluk)
   }
 
   pushSpriteAndDelete(sprSmall, x, y);
@@ -3052,7 +3052,7 @@ void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
   }
 
   // Draw stats below the heatmap
-  int ty = 52; // Hava durumu alt yazisi ile ayni hizadan (52) baslasin
+  int ty = 58; // Hava durumu alt yazisi ile ayni hizadan (58) baslasin, bosluk artti
   sprSmall.setTextColor(COL_ACCENT, COL_PANEL); // Webden secilen 2. renk (Accent)
   
   // Font 1 kullanarak hepsini yanyana tek satira sigdirdik
