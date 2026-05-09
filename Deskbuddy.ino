@@ -3021,15 +3021,15 @@ void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
 
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString("GitHub", 10, 2, 2);
-  
+  sprSmall.drawString("GitHub", 10, 8, 2);
+
   // Kullanici ismini sildik (yer darligi sebebiyle)
 
   int bw = 10;
   int gap = 2;
   int totalW = 7 * bw + 6 * gap;
   int sx = (w - totalW) / 2;
-  int sy1 = 20;
+  int sy1 = 28; // Hava durumu derecesi ile ayni hizadan (28) baslasin
 
   for (int i = 0; i < 14; i++) {
     uint8_t lvl = localLevels[i];
@@ -3052,8 +3052,8 @@ void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
   }
 
   // Draw stats below the heatmap
-  int ty = sy1 + 2 * bw + gap + 10;
-  sprSmall.setTextColor(COL_DIM, COL_PANEL); // Ikincil renk (Secondary)
+  int ty = 52; // Hava durumu alt yazisi ile ayni hizadan (52) baslasin
+  sprSmall.setTextColor(COL_ACCENT, COL_PANEL); // Webden secilen 2. renk (Accent)
   
   // Font 1 kullanarak hepsini yanyana tek satira sigdirdik
   String stats = "S:" + String(streak) + " B:" + String(todayCommits) + " Y:" + String(localTotalLastYear);
