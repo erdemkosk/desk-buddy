@@ -39,7 +39,9 @@ extern String regionFormatKey;
 extern bool flashModeEnabled;
 extern int sleepIntervalMin;
 extern int timerPresetMin[6];
-extern HomeWidgetType homeWidgetSlots[HOME_SLOT_COUNT];
+extern PageLayout pageLayouts[3];
+extern String tabNames[4];
+extern HomeWidgetType pageWidgetSlots[3][HOME_SLOT_COUNT];
 
 extern String calendarUrl;
 extern time_t lastCalendarFetch;
@@ -158,11 +160,6 @@ static void handleRoot() {
   String region = prefs.getString("region", "europe");
   String nickname = prefs.getString("nickname", "");
   bool flashMode = prefs.getBool("flashMode", false);
-  String homeSlotKeys[HOME_SLOT_COUNT];
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    homeSlotKeys[i] = prefs.getString((String("homeSlot") + String(i)).c_str(),
-                                      homeWidgetKey(homeWidgetSlots[i]));
-  }
 
   String page;
   page.reserve(21000);
@@ -650,24 +647,37 @@ static void handleRoot() {
   page += "<div class='muted'>Sadece kullanıcı adını girin (Örnek: octocat).</div>";
   page += "</div></div>";
 
-  page += "<div class='panel' data-panel='widgets'>";
+  page += "<div class='panel' data-panel='tabs'>";
   page += "<button type='button' class='panel-toggle' "
-          "aria-expanded='true'><h2>Widget Customization</h2><span "
+          "aria-expanded='true'><h2>Sekme Tasarımları (Tabs)</h2><span "
           "class='panel-chevron'>&#9662;</span></button>";
   page += "<div class='panel-body'>";
-  page += "<p>Choose which widgets appear in the four Home slots below the "
-          "clock card.</p>";
-  page += "<div class='grid'>";
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    page += "<div><label class='label'>";
-    page += homeSlotLabel(i);
-    page += "</label><select name='homeSlot";
-    page += String(i);
-    page += "'>";
-    appendHomeWidgetOptions(page, homeSlotKeys[i]);
+  
+  for (int p = 0; p < 3; p++) {
+    page += "<h3>Sekme " + String(p + 1) + "</h3>";
+    page += "<div style='margin-bottom: 10px;'>";
+    page += "<label class='label'>Sekme İsmi (Max 6 harf)</label>";
+    page += "<input type='text' name='t_name" + String(p) + "' value='" + htmlEscape(tabNames[p]) + "' maxlength='6'>";
+    page += "</div>";
+
+    page += "<div style='margin-bottom: 10px;'>";
+    page += "<label class='label'>Sayfa Tipi (Layout)</label>";
+    page += "<select name='t_lay" + String(p) + "' onchange='document.getElementById(\"grid_p" + String(p) + "\").style.display=(this.value==\"0\")?\"grid\":\"none\"'>";
+    page += "<option value='0'" + String(pageLayouts[p] == LAYOUT_GRID ? " selected" : "") + ">Izgara (4 Widget)</option>";
+    page += "<option value='1'" + String(pageLayouts[p] == LAYOUT_FULL_WEATHER ? " selected" : "") + ">Tam Ekran: Hava Durumu</option>";
+    page += "<option value='2'" + String(pageLayouts[p] == LAYOUT_FULL_NOTES ? " selected" : "") + ">Tam Ekran: Notlar</option>";
     page += "</select></div>";
+
+    page += "<div id='grid_p" + String(p) + "' class='grid' style='display:" + String(pageLayouts[p] == LAYOUT_GRID ? "grid" : "none") + "; padding-top: 10px;'>";
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      page += "<div><label class='label'>";
+      page += homeSlotLabel(i);
+      page += "</label><select name='t" + String(p) + "slot" + String(i) + "'>";
+      appendHomeWidgetOptions(page, homeWidgetKey(pageWidgetSlots[p][i]));
+      page += "</select></div>";
+    }
+    page += "</div><hr style='margin: 20px 0;'>";
   }
-  page += "</div>";
   page += "</div></div>";
 
   page += "</div><div class='stack'>";
@@ -752,12 +762,25 @@ static void handleSave() {
   String newGithubUser =
       server.hasArg("githubUser") ? server.arg("githubUser") : githubUser;
   newGithubUser.trim();
-  HomeWidgetType newHomeSlots[HOME_SLOT_COUNT];
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    String key = String("homeSlot") + String(i);
-    String currentKey = homeWidgetKey(homeWidgetSlots[i]);
-    newHomeSlots[i] =
-        homeWidgetFromKey(server.hasArg(key) ? server.arg(key) : currentKey);
+  String newTabNames[3];
+  PageLayout newLayouts[3];
+  HomeWidgetType newWidgetSlots[3][HOME_SLOT_COUNT];
+
+  for (int p = 0; p < 3; p++) {
+    String nameKey = "t_name" + String(p);
+    newTabNames[p] = server.hasArg(nameKey) ? server.arg(nameKey) : tabNames[p];
+    newTabNames[p].trim();
+    if (newTabNames[p].length() == 0) newTabNames[p] = "Sekme" + String(p+1);
+    if (newTabNames[p].length() > 6) newTabNames[p] = newTabNames[p].substring(0, 6);
+
+    String layoutKey = "t_lay" + String(p);
+    newLayouts[p] = server.hasArg(layoutKey) ? (PageLayout)server.arg(layoutKey).toInt() : pageLayouts[p];
+
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      String slotKey = "t" + String(p) + "slot" + String(i);
+      String currentKey = homeWidgetKey(pageWidgetSlots[p][i]);
+      newWidgetSlots[p][i] = homeWidgetFromKey(server.hasArg(slotKey) ? server.arg(slotKey) : currentKey);
+    }
   }
 
   float newLat = server.hasArg("lat") ? server.arg("lat").toFloat() : LAT;
@@ -804,8 +827,12 @@ static void handleSave() {
   unitKey = newUnits;
   regionFormatKey = newRegion;
   flashModeEnabled = newFlashMode;
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    homeWidgetSlots[i] = newHomeSlots[i];
+  for (int p = 0; p < 3; p++) {
+    tabNames[p] = newTabNames[p];
+    pageLayouts[p] = newLayouts[p];
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      pageWidgetSlots[p][i] = newWidgetSlots[p][i];
+    }
   }
 
   for (int i = 0; i < 6; i++) {
@@ -830,9 +857,13 @@ static void handleSave() {
   prefs.putString("calUrl", calendarUrl);
   prefs.putString("spotifyUrl", spotifyUrl);
   prefs.putString("githubUser", githubUser);
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    String key = String("homeSlot") + String(i);
-    prefs.putString(key.c_str(), homeWidgetKey(homeWidgetSlots[i]));
+  for (int p = 0; p < 3; p++) {
+    prefs.putString(("t_name" + String(p)).c_str(), tabNames[p]);
+    prefs.putInt(("t_lay" + String(p)).c_str(), (int)pageLayouts[p]);
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      String slotKey = "t" + String(p) + "slot" + String(i);
+      prefs.putString(slotKey.c_str(), homeWidgetKey(pageWidgetSlots[p][i]));
+    }
   }
   for (int i = 0; i < 6; i++) {
     String key = String("timer") + String(i);

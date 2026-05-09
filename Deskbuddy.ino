@@ -132,17 +132,23 @@ static bool notesViewportDirty = true;
 static bool notesFingerDown = false;
 static int notesDragLastY = 0;
 String buddyNickname = "";
-
-HomeWidgetType homeWidgetSlots[HOME_SLOT_COUNT] = {
-    HOME_WIDGET_HUMIDITY, HOME_WIDGET_TIMER, HOME_WIDGET_RAIN,
-    HOME_WIDGET_OUTDOOR};
-
-String cacheHomeSlots[HOME_SLOT_COUNT];
+PageLayout pageLayouts[3] = {LAYOUT_GRID, LAYOUT_FULL_WEATHER, LAYOUT_FULL_NOTES};
+String tabNames[4] = {"Ana", "Hava", "Notlar", "Durum"};
+HomeWidgetType pageWidgetSlots[3][HOME_SLOT_COUNT] = {
+  {HOME_WIDGET_TIMER, HOME_WIDGET_HUMIDITY, HOME_WIDGET_RAIN, HOME_WIDGET_FINANCE},
+  {HOME_WIDGET_BUDDY, HOME_WIDGET_SPOTIFY, HOME_WIDGET_GITHUB, HOME_WIDGET_CALENDAR},
+  {HOME_WIDGET_TIMER, HOME_WIDGET_NOTES, HOME_WIDGET_HUMIDITY, HOME_WIDGET_SUN}
+};
+String cachePageWidgets[3][HOME_SLOT_COUNT];
 
 bool isWidgetActive(HomeWidgetType type) {
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    if (homeWidgetSlots[i] == type) {
-      return true;
+  for (int p = 0; p < 3; p++) {
+    if (pageLayouts[p] == LAYOUT_GRID) {
+      for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+        if (pageWidgetSlots[p][i] == type) {
+          return true;
+        }
+      }
     }
   }
   return false;
@@ -151,7 +157,7 @@ bool isWidgetActive(HomeWidgetType type) {
 // =========================================================
 // STATE
 // =========================================================
-Page currentPage = PAGE_HOME;
+Page currentPage = PAGE_TAB_0;
 Page lastDrawnPage = (Page)-1;
 
 unsigned long lastClockTick = 0;
@@ -364,8 +370,10 @@ void appendHomeWidgetOptions(String &page, const String &selectedKey) {
 }
 
 void clearHomeSlotCaches() {
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    cacheHomeSlots[i] = "";
+  for (int p = 0; p < 3; p++) {
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      cachePageWidgets[p][i] = "";
+    }
   }
 }
 
@@ -1271,10 +1279,18 @@ void loadStoredSettings() {
     prefs.putString("wifiPass", String(DESKBUDDY_WIFI_FALLBACK_PASS));
   }
 
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    String key = String("homeSlot") + String(i);
-    homeWidgetSlots[i] = homeWidgetFromKey(
-        prefs.getString(key.c_str(), homeWidgetKey(homeWidgetSlots[i])));
+  for (int p = 0; p < 3; p++) {
+    String nameKey = "t_name" + String(p);
+    tabNames[p] = prefs.getString(nameKey.c_str(), tabNames[p]);
+    
+    String layoutKey = "t_lay" + String(p);
+    pageLayouts[p] = (PageLayout)prefs.getInt(layoutKey.c_str(), (int)pageLayouts[p]);
+
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      String slotKey = "t" + String(p) + "slot" + String(i);
+      pageWidgetSlots[p][i] = homeWidgetFromKey(
+          prefs.getString(slotKey.c_str(), homeWidgetKey(pageWidgetSlots[p][i])));
+    }
   }
 
   for (int i = 0; i < 6; i++) {
@@ -2116,7 +2132,6 @@ void drawNavBar() {
   tft.drawFastHLine(0, y, SCREEN_W, COL_STROKE);
 
   const int btnW = SCREEN_W / 4;
-  const char *names[4] = {"Ana", "Hava", "Notlar", "Durum"};
 
   for (int i = 0; i < 4; i++) {
     int bx = i * btnW;
@@ -2131,7 +2146,7 @@ void drawNavBar() {
 
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(fg, bg);
-    tft.drawString(names[i], bx + btnW / 2, y + NAV_H / 2, 1);
+    tft.drawString(tabNames[i], bx + btnW / 2, y + NAV_H / 2, 1);
   }
 
   tft.setTextDatum(TL_DATUM);
@@ -3132,61 +3147,61 @@ void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
   pushSpriteAndDelete(sprSmall, x, y);
 }
 
-void drawHomeSlotWidget(int slot, bool force = false) {
+void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
   int x, y, w, h;
   getHomeSlotRect(slot, x, y, w, h);
 
-  switch (homeWidgetSlots[slot]) {
+  switch (pageWidgetSlots[pageIdx][slot]) {
   case HOME_WIDGET_HUMIDITY:
     drawWeatherStyleMetricSprite(x, y, w, h,
                                  homeWidgetLabel(HOME_WIDGET_HUMIDITY),
-                                 humidityText(), cacheHomeSlots[slot], force);
+                                 humidityText(), cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_TIMER:
-    drawFocusTimerWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawFocusTimerWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_RAIN:
     drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_RAIN),
-                                 rainText(), cacheHomeSlots[slot], force);
+                                 rainText(), cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_OUTDOOR:
-    drawOutdoorHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawOutdoorHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_KP:
     drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_KP),
-                                 kpText(), cacheHomeSlots[slot], force,
+                                 kpText(), cachePageWidgets[pageIdx][slot], force,
                                  kpLevelText());
     break;
   case HOME_WIDGET_UV:
     drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_UV),
-                                 uvText(), cacheHomeSlots[slot], force,
+                                 uvText(), cachePageWidgets[pageIdx][slot], force,
                                  uvLevelText());
     break;
   case HOME_WIDGET_WIND:
     drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_WIND),
-                                 windText(), cacheHomeSlots[slot], force,
+                                 windText(), cachePageWidgets[pageIdx][slot], force,
                                  windDirectionText());
     break;
   case HOME_WIDGET_SUN:
-    drawSunEventWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawSunEventWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_FINANCE:
-    drawFinanceHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawFinanceHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_BUDDY:
-    drawBuddyHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawBuddyHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_NOTES:
-    drawNotesHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawNotesHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_CALENDAR:
-    drawCalendarHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawCalendarHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_SPOTIFY:
-    drawSpotifyHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawSpotifyHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_GITHUB:
-    drawGithubHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawGithubHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   }
 }
@@ -3303,9 +3318,9 @@ void drawTimerDoneOverlay(bool force = false) {
 // =========================================================
 // PAGES
 // =========================================================
-void drawHomePageFull() {
+void drawGridPageFull(int pageIdx) {
   tft.fillScreen(COL_BG);
-  drawTopBar(homeTitleText());
+  drawTopBar(tabNames[pageIdx]);
   drawNavBar();
 
   cacheClock = "";
@@ -3313,15 +3328,15 @@ void drawHomePageFull() {
   cacheHomeEmpty2 = "";
   cacheFocusTimer = "";
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    cacheHomeSlots[i] = "";
+    cachePageWidgets[pageIdx][i] = "";
   }
 
   pageDirty = false;
-  lastDrawnPage = PAGE_HOME;
+  lastDrawnPage = currentPage;
 
   drawClockCardSprite(true);
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    drawHomeSlotWidget(i, true);
+    drawGridSlotWidget(pageIdx, i, true);
   }
   if (focusMenuOpen)
     drawFocusMenuOverlay(true);
@@ -3329,7 +3344,7 @@ void drawHomePageFull() {
     drawTimerDoneOverlay(true);
 }
 
-void updateHomeDynamic() {
+void updateGridDynamic(int pageIdx) {
   if (timerDoneDialogOpen) {
     drawTimerDoneOverlay(false);
     return;
@@ -3342,7 +3357,7 @@ void updateHomeDynamic() {
 
   drawClockCardSprite(false);
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    drawHomeSlotWidget(i, false);
+    drawGridSlotWidget(pageIdx, i, false);
   }
 }
 
@@ -3576,22 +3591,20 @@ void updateStatusDynamic() {
 }
 
 void drawCurrentPageFull() {
-  switch (currentPage) {
-  case PAGE_HOME:
-    drawHomePageFull();
-    break;
-  case PAGE_WEATHER:
-    drawWeatherPageFull();
-    break;
-  case PAGE_NOTES:
-    drawNotesPageFull();
-    break;
-  case PAGE_STATUS:
+  if (currentPage == PAGE_STATUS) {
     drawStatusPageFull();
-    break;
+  } else {
+    int pageIdx = (int)currentPage;
+    if (pageLayouts[pageIdx] == LAYOUT_GRID) {
+      drawGridPageFull(pageIdx);
+    } else if (pageLayouts[pageIdx] == LAYOUT_FULL_WEATHER) {
+      drawWeatherPageFull();
+    } else if (pageLayouts[pageIdx] == LAYOUT_FULL_NOTES) {
+      drawNotesPageFull();
+    }
   }
 
-  if (focusMenuOpen && currentPage == PAGE_HOME)
+  if (focusMenuOpen && currentPage < 3 && pageLayouts[(int)currentPage] == LAYOUT_GRID)
     drawFocusMenuOverlay(true);
   if (timerDoneDialogOpen)
     drawTimerDoneOverlay(true);
@@ -3610,24 +3623,22 @@ void updateCurrentPageDynamic() {
     return;
   }
 
-  if (focusMenuOpen && currentPage == PAGE_HOME) {
+  if (focusMenuOpen && currentPage < 3 && pageLayouts[(int)currentPage] == LAYOUT_GRID) {
     drawFocusMenuOverlay(false);
     return;
   }
 
-  switch (currentPage) {
-  case PAGE_HOME:
-    updateHomeDynamic();
-    break;
-  case PAGE_WEATHER:
-    updateWeatherDynamic();
-    break;
-  case PAGE_NOTES:
-    updateNotesDynamic();
-    break;
-  case PAGE_STATUS:
+  if (currentPage == PAGE_STATUS) {
     updateStatusDynamic();
-    break;
+  } else {
+    int pageIdx = (int)currentPage;
+    if (pageLayouts[pageIdx] == LAYOUT_GRID) {
+      updateGridDynamic(pageIdx);
+    } else if (pageLayouts[pageIdx] == LAYOUT_FULL_WEATHER) {
+      updateWeatherDynamic();
+    } else if (pageLayouts[pageIdx] == LAYOUT_FULL_NOTES) {
+      updateNotesDynamic();
+    }
   }
 }
 
@@ -3681,15 +3692,12 @@ bool handleFocusMenuTouch(int x, int y) {
   return true;
 }
 
-bool handleHomeTouch(int x, int y) {
-  if (currentPage != PAGE_HOME)
-    return false;
-
+bool handleGridTouch(int pageIdx, int x, int y) {
   if (focusMenuOpen)
     return handleFocusMenuTouch(x, y);
 
   for (int slot = 0; slot < HOME_SLOT_COUNT; slot++) {
-    if (homeWidgetSlots[slot] != HOME_WIDGET_TIMER)
+    if (pageWidgetSlots[pageIdx][slot] != HOME_WIDGET_TIMER)
       continue;
 
     int slotX, slotY, slotW, slotH;
@@ -3709,6 +3717,18 @@ bool handleHomeTouch(int x, int y) {
     }
   }
 
+  return false;
+}
+
+bool handlePageTouch(int x, int y) {
+  if (currentPage == PAGE_STATUS) {
+    return handleStatusTouch(x, y);
+  } else {
+    int pageIdx = (int)currentPage;
+    if (pageLayouts[pageIdx] == LAYOUT_GRID) {
+      return handleGridTouch(pageIdx, x, y);
+    }
+  }
   return false;
 }
 
@@ -4043,12 +4063,12 @@ void loop() {
         if (!manualDimMode) {
           wakeDisplay(true);
         } else {
-          if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
+          if (!handlePageTouch(tx, ty)) {
             handleNavTouch(tx, ty);
           }
         }
       } else {
-        if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
+        if (!handlePageTouch(tx, ty)) {
           handleNavTouch(tx, ty);
         }
       }
