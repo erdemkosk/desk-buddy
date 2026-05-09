@@ -2688,7 +2688,7 @@ static void paintNotesViewport() {
 }
 
 static void pollNotesScrollTouch() {
-  if (currentPage != PAGE_NOTES) {
+  if (currentPage >= 3 || pageLayouts[currentPage] != LAYOUT_FULL_NOTES) {
     notesFingerDown = false;
     return;
   }
@@ -3374,7 +3374,7 @@ void drawWeatherPageFull() {
   drawCard(124, PAGE_ROW3_Y, 108, PAGE_WIDGET_H, true);
 
   pageDirty = false;
-  lastDrawnPage = PAGE_WEATHER;
+  lastDrawnPage = currentPage;
 
   lastTempText = "";
   lastRainText = "";
@@ -3484,7 +3484,7 @@ void drawNotesPageFull() {
   drawCard(8, 42, 224, 226, true);
 
   pageDirty = false;
-  lastDrawnPage = PAGE_NOTES;
+  lastDrawnPage = currentPage;
   lastNotesText = "";
   notesFingerDown = false;
   notesViewportDirty = true;
@@ -4101,7 +4101,7 @@ void loop() {
     dataDirty = false;
   }
 
-  if (currentPage == PAGE_HOME && !focusMenuOpen && !timerDoneDialogOpen &&
+  if (currentPage < 3 && pageLayouts[currentPage] == LAYOUT_GRID && !focusMenuOpen && !timerDoneDialogOpen &&
       !wifiForgetConfirmOpen && !sleepOff) {
     static unsigned long lastBuddyAnimMs = 0;
     bool needsAnim = false;
@@ -4122,7 +4122,7 @@ void loop() {
     }
   }
 
-  if (currentPage == PAGE_NOTES && !sleepOff) {
+  if (currentPage < 3 && pageLayouts[currentPage] == LAYOUT_FULL_NOTES && !sleepOff) {
     updateNotesDynamic();
   }
 
