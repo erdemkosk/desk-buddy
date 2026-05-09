@@ -3025,10 +3025,10 @@ void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
   
   // User name top right
   sprSmall.setTextDatum(TR_DATUM);
-  if (localUser.length() > 10) {
-    sprSmall.drawString("@" + localUser.substring(0, 8) + "..", w - 10, 2, 1);
+  if (localUser.length() > 6) {
+    sprSmall.drawString(localUser.substring(0, 6) + "..", w - 10, 2, 1);
   } else {
-    sprSmall.drawString("@" + localUser, w - 10, 2, 1);
+    sprSmall.drawString(localUser, w - 10, 2, 1);
   }
   sprSmall.setTextDatum(TL_DATUM);
 
@@ -3060,15 +3060,15 @@ void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
 
   // Draw stats below the heatmap
   int ty = sy1 + 2 * bw + gap + 10;
-  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  sprSmall.drawString("Seri: " + String(streak) + " Gun", 10, ty, 2);
+  sprSmall.setTextColor(COL_DIM, COL_PANEL); // Ikincil renk (Secondary)
+  sprSmall.drawString("S: " + String(streak), 10, ty, 2);
   
-  ty += 16;
-  sprSmall.drawString("Bugun: " + String(todayCommits) + " Commit", 10, ty, 2);
+  ty += 14; // Biraz daha siki aralik
+  sprSmall.drawString("B: " + String(todayCommits), 10, ty, 2);
   
-  ty += 16;
-  sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
-  sprSmall.drawString("Yillik: " + String(localTotalLastYear), 10, ty, 2);
+  ty += 14;
+  sprSmall.setTextColor(COL_ACCENT, COL_PANEL); // Vurgu rengi
+  sprSmall.drawString("Y: " + String(localTotalLastYear), 10, ty, 2);
 
   pushSpriteAndDelete(sprSmall, x, y);
 }
