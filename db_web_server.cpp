@@ -62,7 +62,7 @@ extern String cacheHomeEmpty2;
 extern String cacheFocusTimer;
 extern String cacheTimerMenu;
 extern String cacheTimerDone;
-extern String cacheHomeSlots[HOME_SLOT_COUNT];
+extern String cachePageWidgets[3][HOME_SLOT_COUNT];
 
 extern String lastTempText;
 extern String lastRainText;
@@ -888,8 +888,10 @@ static void handleSave() {
   cacheFocusTimer = "";
   cacheTimerMenu = "";
   cacheTimerDone = "";
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    cacheHomeSlots[i] = "";
+  for (int p = 0; p < 3; p++) {
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      cachePageWidgets[p][i] = "";
+    }
   }
 
   lastTempText = "";
