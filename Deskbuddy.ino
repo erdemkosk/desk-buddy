@@ -210,6 +210,8 @@ SemaphoreHandle_t spotifyMutex = NULL;
 
 String githubUser = "";
 uint8_t githubLevels[14] = {0};
+int githubCounts[14] = {0};
+int githubTotalLastYear = 0;
 time_t lastGithubFetch = 0;
 SemaphoreHandle_t githubMutex = NULL;
 
@@ -1802,21 +1804,45 @@ static bool fetchGithubData() {
     if (http.GET() == 200) {
       String payload = http.getString();
       uint8_t tempLevels[14] = {0};
+      int tempCounts[14] = {0};
       int count = 0;
 
-      int idx = payload.indexOf("\"level\":");
+      int tyIdx = payload.indexOf("\"lastYear\":");
+      int parsedLastYear = 0;
+      if (tyIdx != -1) {
+        tyIdx += 11;
+        int eIdx = tyIdx;
+        while (eIdx < payload.length() && isDigit(payload[eIdx])) eIdx++;
+        if (eIdx > tyIdx) parsedLastYear = payload.substring(tyIdx, eIdx).toInt();
+      }
+
+      int idx = payload.indexOf("{\"date\":");
       while (idx != -1) {
-        idx += 8; // skip "\"level\":"
-        int endIdx = idx;
-        while (endIdx < payload.length() && isDigit(payload[endIdx])) {
-          endIdx++;
+        int cIdx = payload.indexOf("\"count\":", idx);
+        int cVal = 0;
+        if (cIdx != -1 && cIdx < idx + 50) {
+           cIdx += 8;
+           int eIdx = cIdx;
+           while(eIdx < payload.length() && isDigit(payload[eIdx])) eIdx++;
+           if (eIdx > cIdx) cVal = payload.substring(cIdx, eIdx).toInt();
         }
-        if (endIdx > idx) {
-          int level = payload.substring(idx, endIdx).toInt();
-          tempLevels[count % 14] = (uint8_t)level;
+        
+        int lIdx = payload.indexOf("\"level\":", idx);
+        int lVal = 0;
+        if (lIdx != -1 && lIdx < idx + 50) {
+           lIdx += 8;
+           int eIdx = lIdx;
+           while(eIdx < payload.length() && isDigit(payload[eIdx])) eIdx++;
+           if (eIdx > lIdx) lVal = payload.substring(lIdx, eIdx).toInt();
+        }
+
+        if (cIdx != -1 && lIdx != -1) {
+          tempLevels[count % 14] = (uint8_t)lVal;
+          tempCounts[count % 14] = cVal;
           count++;
         }
-        idx = payload.indexOf("\"level\":", endIdx);
+        
+        idx = payload.indexOf("{\"date\":", lIdx);
         vTaskDelay(1 / portTICK_PERIOD_MS); // Feed the watchdog
       }
       
@@ -1825,7 +1851,9 @@ static bool fetchGithubData() {
           // Unwrap the circular buffer so githubLevels[13] is the most recent day
           for (int i = 0; i < 14; i++) {
             githubLevels[i] = tempLevels[(count + i) % 14];
+            githubCounts[i] = tempCounts[(count + i) % 14];
           }
+          githubTotalLastYear = parsedLastYear;
           lastGithubFetch = time(nullptr);
           xSemaphoreGive(githubMutex);
         }
@@ -2960,12 +2988,28 @@ void drawCalendarHomeWidget(int x, int y, int w, int h, String &cache,
 void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
                           bool force = false) {
   uint8_t localLevels[14] = {0};
+  int localCounts[14] = {0};
+  int localTotalLastYear = 0;
+  String localUser = "";
+  
   if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
     memcpy(localLevels, githubLevels, 14);
+    memcpy(localCounts, githubCounts, sizeof(int) * 14);
+    localTotalLastYear = githubTotalLastYear;
+    localUser = githubUser;
     xSemaphoreGive(githubMutex);
   }
 
-  String combined = "";
+  // Calculate Streak
+  int streak = 0;
+  for (int i = 13; i >= 0; i--) {
+    if (localCounts[i] > 0) streak++;
+    else break;
+  }
+  
+  int todayCommits = localCounts[13];
+
+  String combined = String(localTotalLastYear) + "," + String(streak) + "," + String(todayCommits) + ",";
   for (int i = 0; i < 14; i++)
     combined += String(localLevels[i]) + ",";
   combined += String(COL_PANEL) + "|" + String(COL_TEXT);
@@ -2978,6 +3022,15 @@ void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
   sprSmall.drawString("GitHub", 10, 2, 2);
+  
+  // User name top right
+  sprSmall.setTextDatum(TR_DATUM);
+  if (localUser.length() > 10) {
+    sprSmall.drawString("@" + localUser.substring(0, 8) + "..", w - 10, 2, 1);
+  } else {
+    sprSmall.drawString("@" + localUser, w - 10, 2, 1);
+  }
+  sprSmall.setTextDatum(TL_DATUM);
 
   int bw = 10;
   int gap = 2;
@@ -3004,6 +3057,18 @@ void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
     sprSmall.fillRoundRect(sx + colIdx * (bw + gap), sy1 + row * (bw + gap), bw,
                            bw, 2, col);
   }
+
+  // Draw stats below the heatmap
+  int ty = sy1 + 2 * bw + gap + 10;
+  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  sprSmall.drawString("Seri: " + String(streak) + " Gun", 10, ty, 2);
+  
+  ty += 16;
+  sprSmall.drawString("Bugun: " + String(todayCommits) + " Commit", 10, ty, 2);
+  
+  ty += 16;
+  sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
+  sprSmall.drawString("Yillik: " + String(localTotalLastYear), 10, ty, 2);
 
   pushSpriteAndDelete(sprSmall, x, y);
 }
