@@ -3887,7 +3887,20 @@ void updateMeetingFlashState() {
       wasMeetingFlashing = false;
       setBacklight(sleepDimmed ? BL_DIM : prefs.getInt("bl", 200));
     }
-  }
+void hwSetupScrollArea(uint16_t tfa, uint16_t vsa, uint16_t bfa) {
+  tft.writecommand(0x33);
+  tft.writedata(tfa >> 8);
+  tft.writedata(tfa);
+  tft.writedata(vsa >> 8);
+  tft.writedata(vsa);
+  tft.writedata(bfa >> 8);
+  tft.writedata(bfa);
+}
+
+void hwScrollTo(uint16_t vsp) {
+  tft.writecommand(0x37);
+  tft.writedata(vsp >> 8);
+  tft.writedata(vsp);
 }
 
 void animatePageTransition(Page oldP, Page newP) {
@@ -3896,23 +3909,23 @@ void animatePageTransition(Page oldP, Page newP) {
   const int vsa = SCREEN_H - TOPBAR_H - NAV_H;
   const int bfa = NAV_H;
 
-  tft.setupScrollArea(tfa, vsa, bfa);
+  hwSetupScrollArea(tfa, vsa, bfa);
 
   int step = 11; // 242 is evenly divisible by 11 (22 frames)
   for (int i = 0; i <= vsa; i += step) {
     if (i == 0) continue;
     if (slideUp) {
-      tft.scrollTo(i);
+      hwScrollTo(tfa + i);
       tft.fillRect(0, tfa + i - step, SCREEN_W, step, COL_BG);
     } else {
-      tft.scrollTo(vsa - i);
+      hwScrollTo(tfa + vsa - i);
       tft.fillRect(0, tfa + vsa - i, SCREEN_W, step, COL_BG);
     }
     delay(4);
   }
 
-  tft.scrollTo(0);
-  tft.setupScrollArea(0, SCREEN_H, 0);
+  hwScrollTo(0);
+  hwSetupScrollArea(0, SCREEN_H, 0);
 }
 
 void loop() {
