@@ -3017,7 +3017,7 @@ void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
     return;
   cache = combined;
 
-  makeSpriteCard(sprSmall, w, h, false);
+  makeSpriteCard(sprSmall, w, h, true);
 
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
