@@ -1801,6 +1801,7 @@ static bool fetchGithubData() {
   if (http.begin(client, url)) {
     if (http.GET() == 200) {
       WiFiClient *stream = http.getStreamPtr();
+      stream->setTimeout(10000); // 10s timeout to prevent early termination on slow connections
       uint8_t tempLevels[14] = {0};
       int count = 0;
 
@@ -1809,6 +1810,7 @@ static bool fetchGithubData() {
         int level = stream->parseInt();
         tempLevels[count % 14] = (uint8_t)level;
         count++;
+        vTaskDelay(1 / portTICK_PERIOD_MS); // Feed the watchdog!
       }
       
       if (count > 0) {
@@ -3833,7 +3835,7 @@ void setup() {
   calendarMutex = xSemaphoreCreateMutex();
   githubMutex = xSemaphoreCreateMutex();
   if (spotifyMutex || calendarMutex || githubMutex) {
-    xTaskCreatePinnedToCore(networkFetchTask, "NetworkTask", 6144, NULL, 1,
+    xTaskCreatePinnedToCore(networkFetchTask, "NetworkTask", 10240, NULL, 1,
                             NULL, 0);
   }
 
