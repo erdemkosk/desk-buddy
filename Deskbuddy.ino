@@ -4105,9 +4105,10 @@ void loop() {
       !wifiForgetConfirmOpen && !sleepOff) {
     static unsigned long lastBuddyAnimMs = 0;
     bool needsAnim = false;
+    int p = (int)currentPage;
     for (int s = 0; s < HOME_SLOT_COUNT; s++) {
-      if (homeWidgetSlots[s] == HOME_WIDGET_BUDDY ||
-          (homeWidgetSlots[s] == HOME_WIDGET_SPOTIFY && spotifyPlaying)) {
+      if (pageWidgetSlots[p][s] == HOME_WIDGET_BUDDY ||
+          (pageWidgetSlots[p][s] == HOME_WIDGET_SPOTIFY && spotifyPlaying)) {
         needsAnim = true;
         break;
       }
@@ -4115,9 +4116,9 @@ void loop() {
     if (needsAnim && millis() - lastBuddyAnimMs >= 70UL) {
       lastBuddyAnimMs = millis();
       for (int s = 0; s < HOME_SLOT_COUNT; s++) {
-        if (homeWidgetSlots[s] == HOME_WIDGET_BUDDY ||
-            (homeWidgetSlots[s] == HOME_WIDGET_SPOTIFY && spotifyPlaying))
-          drawHomeSlotWidget(s, false);
+        if (pageWidgetSlots[p][s] == HOME_WIDGET_BUDDY ||
+            (pageWidgetSlots[p][s] == HOME_WIDGET_SPOTIFY && spotifyPlaying))
+          drawGridSlotWidget(p, s, false);
       }
     }
   }
