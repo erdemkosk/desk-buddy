@@ -1800,17 +1800,24 @@ static bool fetchGithubData() {
   String url = "https://github-contributions-api.jogruber.de/v4/" + githubUser + "?y=last";
   if (http.begin(client, url)) {
     if (http.GET() == 200) {
-      WiFiClient *stream = http.getStreamPtr();
-      stream->setTimeout(10000); // 10s timeout to prevent early termination on slow connections
+      String payload = http.getString();
       uint8_t tempLevels[14] = {0};
       int count = 0;
 
-      // Extract the last 14 \"level\":X occurrences
-      while (stream->find("\"level\":")) {
-        int level = stream->parseInt();
-        tempLevels[count % 14] = (uint8_t)level;
-        count++;
-        vTaskDelay(1 / portTICK_PERIOD_MS); // Feed the watchdog!
+      int idx = payload.indexOf("\"level\":");
+      while (idx != -1) {
+        idx += 8; // skip "\"level\":"
+        int endIdx = idx;
+        while (endIdx < payload.length() && isDigit(payload[endIdx])) {
+          endIdx++;
+        }
+        if (endIdx > idx) {
+          int level = payload.substring(idx, endIdx).toInt();
+          tempLevels[count % 14] = (uint8_t)level;
+          count++;
+        }
+        idx = payload.indexOf("\"level\":", endIdx);
+        vTaskDelay(1 / portTICK_PERIOD_MS); // Feed the watchdog
       }
       
       if (count > 0) {
