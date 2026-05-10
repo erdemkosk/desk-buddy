@@ -159,6 +159,9 @@ static String asciiFoldTurkishUtf8ToAscii(const String &in) {
 }
 
 static void handleRoot() {
+  String page = "";
+  page.reserve(48000); // Bellek parcalanmasini onlemek icin basta yer ayir
+
   String accent = prefs.getString("accent", "cyan");
   String bg = prefs.getString("bg", "slate");
   String txt = prefs.getString("text", "standard");

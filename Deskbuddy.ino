@@ -1974,7 +1974,7 @@ static bool fetchSteamStatus() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(10000);
+  http.setTimeout(5000); // 10s -> 5s
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   String urlStatus = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key="
@@ -2015,7 +2015,7 @@ static bool fetchSteamRecent() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(15000);
+  http.setTimeout(5000); // 15s -> 5s
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   // 5 oyun cekelim ki su an oynanani listede bulabilelim
@@ -4565,7 +4565,7 @@ void loop() {
       animatePageTransition(lastDrawnPage, currentPage);
     }
     drawCurrentPageFull();
-    updateCurrentPageDynamic();
+    // updateCurrentPageDynamic() burada gereksiz, drawFull zaten her seyi cizer.
     pageDirty = false;
     dataDirty = false;
   }
