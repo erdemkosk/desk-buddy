@@ -157,7 +157,6 @@ bool isWidgetActive(HomeWidgetType type) {
 // =========================================================
 // STATE
 // =========================================================
-String githubUser = "";
 
 // Water Tracker Global State
 int waterCount = 0;
