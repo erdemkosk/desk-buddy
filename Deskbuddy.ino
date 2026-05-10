@@ -132,17 +132,23 @@ static bool notesViewportDirty = true;
 static bool notesFingerDown = false;
 static int notesDragLastY = 0;
 String buddyNickname = "";
-
-HomeWidgetType homeWidgetSlots[HOME_SLOT_COUNT] = {
-    HOME_WIDGET_HUMIDITY, HOME_WIDGET_TIMER, HOME_WIDGET_RAIN,
-    HOME_WIDGET_OUTDOOR};
-
-String cacheHomeSlots[HOME_SLOT_COUNT];
+PageLayout pageLayouts[3] = {LAYOUT_GRID, LAYOUT_FULL_WEATHER, LAYOUT_FULL_NOTES};
+String tabNames[4] = {"Ana", "Hava", "Notlar", "Durum"};
+HomeWidgetType pageWidgetSlots[3][HOME_SLOT_COUNT] = {
+  {HOME_WIDGET_TIMER, HOME_WIDGET_HUMIDITY, HOME_WIDGET_RAIN, HOME_WIDGET_FINANCE},
+  {HOME_WIDGET_BUDDY, HOME_WIDGET_SPOTIFY, HOME_WIDGET_GITHUB, HOME_WIDGET_CALENDAR},
+  {HOME_WIDGET_TIMER, HOME_WIDGET_NOTES, HOME_WIDGET_HUMIDITY, HOME_WIDGET_SUN}
+};
+String cachePageWidgets[3][HOME_SLOT_COUNT];
 
 bool isWidgetActive(HomeWidgetType type) {
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    if (homeWidgetSlots[i] == type) {
-      return true;
+  for (int p = 0; p < 3; p++) {
+    if (pageLayouts[p] == LAYOUT_GRID || pageLayouts[p] == LAYOUT_GRID_6) {
+      for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+        if (pageWidgetSlots[p][i] == type) {
+          return true;
+        }
+      }
     }
   }
   return false;
@@ -151,7 +157,19 @@ bool isWidgetActive(HomeWidgetType type) {
 // =========================================================
 // STATE
 // =========================================================
-Page currentPage = PAGE_HOME;
+
+// Water Tracker Global State
+int waterCount = 0;
+int waterGoal = 8;
+int lastWaterDay = -1;
+
+// Water widget long-press state
+static bool waterLongPressActive = false;
+static unsigned long waterTouchDownMs = 0;
+static int waterLongPressPage = -1;
+static int waterLongPressSlot = -1;
+
+Page currentPage = PAGE_TAB_0;
 Page lastDrawnPage = (Page)-1;
 
 unsigned long lastClockTick = 0;
@@ -245,6 +263,8 @@ const char *homeWidgetKey(HomeWidgetType type) {
     return "spotify";
   case HOME_WIDGET_GITHUB:
     return "github";
+  case HOME_WIDGET_WATER:
+    return "water";
   default:
     return "humidity";
   }
@@ -280,6 +300,8 @@ const char *homeWidgetLabel(HomeWidgetType type) {
     return "Spotify";
   case HOME_WIDGET_GITHUB:
     return "GitHub";
+  case HOME_WIDGET_WATER:
+    return "Su";
   default:
     return "Nem";
   }
@@ -314,32 +336,37 @@ HomeWidgetType homeWidgetFromKey(const String &key) {
     return HOME_WIDGET_SPOTIFY;
   if (key == "github")
     return HOME_WIDGET_GITHUB;
+  if (key == "water")
+    return HOME_WIDGET_WATER;
   return HOME_WIDGET_HUMIDITY;
 }
 
 const char *homeSlotLabel(int slot) {
   switch (slot) {
-  case 0:
-    return "Ust sol";
-  case 1:
-    return "Ust sag";
-  case 2:
-    return "Alt sol";
-  case 3:
-    return "Alt sag";
-  default:
-    return "Yuva";
+  case 0: return "1. Satir Sol";
+  case 1: return "1. Satir Sag";
+  case 2: return "2. Satir Sol";
+  case 3: return "2. Satir Sag";
+  case 4: return "3. Satir Sol";
+  case 5: return "3. Satir Sag";
+  default: return "Yuva";
   }
 }
 
-void getHomeSlotRect(int slot, int &x, int &y, int &w, int &h) {
-  const int xs[HOME_SLOT_COUNT] = {8, 124, 8, 124};
-  const int ys[HOME_SLOT_COUNT] = {HOME_GRID_Y1, HOME_GRID_Y1, HOME_GRID_Y2,
-                                   HOME_GRID_Y2};
-  x = xs[slot];
-  y = ys[slot];
+void getHomeSlotRect(int pageIdx, int slot, int &x, int &y, int &w, int &h) {
+  x = (slot % 2 == 0) ? 8 : 124;
   w = 108;
   h = HOME_WIDGET_H;
+
+  if (pageLayouts[pageIdx] == LAYOUT_GRID_6) {
+    if (slot < 2) y = PAGE_ROW1_Y;
+    else if (slot < 4) y = PAGE_ROW2_Y;
+    else y = PAGE_ROW3_Y;
+  } else {
+    if (slot < 2) y = PAGE_ROW2_Y;
+    else if (slot < 4) y = PAGE_ROW3_Y;
+    else y = -100;
+  }
 }
 
 void appendHomeWidgetOptions(String &page, const String &selectedKey) {
@@ -348,7 +375,7 @@ void appendHomeWidgetOptions(String &page, const String &selectedKey) {
       HOME_WIDGET_OUTDOOR,  HOME_WIDGET_KP,    HOME_WIDGET_UV,
       HOME_WIDGET_WIND,     HOME_WIDGET_SUN,   HOME_WIDGET_FINANCE,
       HOME_WIDGET_BUDDY,    HOME_WIDGET_NOTES, HOME_WIDGET_CALENDAR,
-      HOME_WIDGET_SPOTIFY,  HOME_WIDGET_GITHUB};
+      HOME_WIDGET_SPOTIFY,  HOME_WIDGET_GITHUB, HOME_WIDGET_WATER};
 
   for (HomeWidgetType type : types) {
     const char *key = homeWidgetKey(type);
@@ -364,8 +391,10 @@ void appendHomeWidgetOptions(String &page, const String &selectedKey) {
 }
 
 void clearHomeSlotCaches() {
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    cacheHomeSlots[i] = "";
+  for (int p = 0; p < 3; p++) {
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      cachePageWidgets[p][i] = "";
+    }
   }
 }
 
@@ -1255,6 +1284,12 @@ void loadStoredSettings() {
   calendarUrl = prefs.getString("calUrl", "");
   spotifyUrl = prefs.getString("spotifyUrl", "");
   githubUser = prefs.getString("githubUser", "");
+
+  waterCount = prefs.getInt("w_cnt", 0);
+  waterGoal = prefs.getInt("w_goal", 8);
+  lastWaterDay = prefs.getInt("w_day", -1);
+  if (waterGoal <= 0) waterGoal = 8;
+
   buddyNickname = prefs.getString("nickname", "");
   locationName = prefs.getString("locname", "Berlin");
   LAT = prefs.getFloat("lat", 52.5200f);
@@ -1271,10 +1306,18 @@ void loadStoredSettings() {
     prefs.putString("wifiPass", String(DESKBUDDY_WIFI_FALLBACK_PASS));
   }
 
-  for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    String key = String("homeSlot") + String(i);
-    homeWidgetSlots[i] = homeWidgetFromKey(
-        prefs.getString(key.c_str(), homeWidgetKey(homeWidgetSlots[i])));
+  for (int p = 0; p < 3; p++) {
+    String nameKey = "t_name" + String(p);
+    tabNames[p] = prefs.getString(nameKey.c_str(), tabNames[p]);
+    
+    String layoutKey = "t_lay" + String(p);
+    pageLayouts[p] = (PageLayout)prefs.getInt(layoutKey.c_str(), (int)pageLayouts[p]);
+
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      String slotKey = "t" + String(p) + "slot" + String(i);
+      pageWidgetSlots[p][i] = homeWidgetFromKey(
+          prefs.getString(slotKey.c_str(), homeWidgetKey(pageWidgetSlots[p][i])));
+    }
   }
 
   for (int i = 0; i < 6; i++) {
@@ -1799,62 +1842,94 @@ static bool fetchGithubData() {
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   bool got = false;
+
+  // ---- Step 1: Fetch only 'total' (lastYear) from the full-year endpoint ----
   String url = "https://github-contributions-api.jogruber.de/v4/" + githubUser + "?y=last";
   if (http.begin(client, url)) {
-    if (http.GET() == 200) {
-      String payload = http.getString();
+    int code = http.GET();
+    if (code == 200) {
+      // Stream-read: we only need the beginning and the END of the payload
+      // The total is at the very start, entries at the end
+      WiFiClient *stream = http.getStreamPtr();
+      String header = "";
+      // Read up to 64 bytes to capture {"total":{"lastYear":NNN}
+      int headerRead = 0;
+      while (stream->available() && headerRead < 64) {
+        header += (char)stream->read();
+        headerRead++;
+      }
+
+      int parsedLastYear = 0;
+      int tyIdx = header.indexOf("\"lastYear\":");
+      if (tyIdx != -1) {
+        int vStart = tyIdx + 11;
+        while (vStart < (int)header.length() && !isDigit(header[vStart])) vStart++;
+        int vEnd = vStart;
+        while (vEnd < (int)header.length() && isDigit(header[vEnd])) vEnd++;
+        if (vEnd > vStart) parsedLastYear = header.substring(vStart, vEnd).toInt();
+      }
+
+      // Read rest into a rolling buffer - we only care about the last 14 entries
+      // Each entry is ~40 bytes, so we need the last ~600 bytes of the response
+      const int TAIL_SIZE = 800;
+      String tail = "";
+      tail.reserve(TAIL_SIZE + 64);
+
+      // Continue reading header
+      while (stream->available()) {
+        char c = stream->read();
+        tail += c;
+        if ((int)tail.length() > TAIL_SIZE + 64) {
+          tail = tail.substring(tail.length() - TAIL_SIZE);
+        }
+        vTaskDelay(1 / portTICK_PERIOD_MS);
+      }
+
+      // Parse entries from the tail
       uint8_t tempLevels[14] = {0};
       int tempCounts[14] = {0};
       int count = 0;
 
-      int tyIdx = payload.indexOf("\"lastYear\":");
-      int parsedLastYear = 0;
-      if (tyIdx != -1) {
-        tyIdx += 11;
-        int eIdx = tyIdx;
-        while (eIdx < payload.length() && isDigit(payload[eIdx])) eIdx++;
-        if (eIdx > tyIdx) parsedLastYear = payload.substring(tyIdx, eIdx).toInt();
-      }
-
-      int idx = payload.indexOf("{\"date\":");
+      int idx = tail.indexOf("{\"date\":");
       while (idx != -1) {
-        int cIdx = payload.indexOf("\"count\":", idx);
+        int entryEnd = tail.indexOf("}", idx);
+        if (entryEnd == -1) entryEnd = idx + 200;
+        else entryEnd += 1;
+
+        int cIdx = tail.indexOf("\"count\":", idx);
         int cVal = 0;
-        if (cIdx != -1 && cIdx < idx + 50) {
-           cIdx += 8;
-           int eIdx = cIdx;
-           while(eIdx < payload.length() && isDigit(payload[eIdx])) eIdx++;
-           if (eIdx > cIdx) cVal = payload.substring(cIdx, eIdx).toInt();
-        }
-        
-        int lIdx = payload.indexOf("\"level\":", idx);
-        int lVal = 0;
-        if (lIdx != -1 && lIdx < idx + 50) {
-           lIdx += 8;
-           int eIdx = lIdx;
-           while(eIdx < payload.length() && isDigit(payload[eIdx])) eIdx++;
-           if (eIdx > lIdx) lVal = payload.substring(lIdx, eIdx).toInt();
+        if (cIdx != -1 && cIdx < entryEnd) {
+          cIdx += 8;
+          int eIdx = cIdx;
+          while (eIdx < (int)tail.length() && isDigit(tail[eIdx])) eIdx++;
+          if (eIdx > cIdx) cVal = tail.substring(cIdx, eIdx).toInt();
         }
 
-        if (cIdx != -1 && lIdx != -1) {
-          tempLevels[count % 14] = (uint8_t)lVal;
-          tempCounts[count % 14] = cVal;
-          count++;
+        int lIdx = tail.indexOf("\"level\":", idx);
+        int lVal = 0;
+        if (lIdx != -1 && lIdx < entryEnd) {
+          lIdx += 8;
+          int eIdx = lIdx;
+          while (eIdx < (int)tail.length() && isDigit(tail[eIdx])) eIdx++;
+          if (eIdx > lIdx) lVal = tail.substring(lIdx, eIdx).toInt();
         }
-        
-        idx = payload.indexOf("{\"date\":", lIdx);
-        vTaskDelay(1 / portTICK_PERIOD_MS); // Feed the watchdog
+
+        tempLevels[count % 14] = (uint8_t)lVal;
+        tempCounts[count % 14] = cVal;
+        count++;
+
+        idx = tail.indexOf("{\"date\":", entryEnd);
       }
-      
-      if (count > 0) {
+
+      if (count > 0 || parsedLastYear > 0) {
         if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
-          // Unwrap the circular buffer so githubLevels[13] is the most recent day
           for (int i = 0; i < 14; i++) {
             githubLevels[i] = tempLevels[(count + i) % 14];
             githubCounts[i] = tempCounts[(count + i) % 14];
           }
-          githubTotalLastYear = parsedLastYear;
+          if (parsedLastYear > 0) githubTotalLastYear = parsedLastYear;
           lastGithubFetch = time(nullptr);
+          lastSyncTime = lastGithubFetch;
           xSemaphoreGive(githubMutex);
         }
         got = true;
@@ -1864,13 +1939,6 @@ static bool fetchGithubData() {
     http.end();
   }
 
-  if (got || githubUser.length() >= 2) {
-    if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
-      lastGithubFetch = time(nullptr);
-      lastSyncTime = lastGithubFetch;
-      xSemaphoreGive(githubMutex);
-    }
-  }
   return got;
 }
 
@@ -2116,7 +2184,6 @@ void drawNavBar() {
   tft.drawFastHLine(0, y, SCREEN_W, COL_STROKE);
 
   const int btnW = SCREEN_W / 4;
-  const char *names[4] = {"Ana", "Hava", "Notlar", "Durum"};
 
   for (int i = 0; i < 4; i++) {
     int bx = i * btnW;
@@ -2131,7 +2198,7 @@ void drawNavBar() {
 
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(fg, bg);
-    tft.drawString(names[i], bx + btnW / 2, y + NAV_H / 2, 1);
+    tft.drawString(tabNames[i], bx + btnW / 2, y + NAV_H / 2, 1);
   }
 
   tft.setTextDatum(TL_DATUM);
@@ -2673,7 +2740,7 @@ static void paintNotesViewport() {
 }
 
 static void pollNotesScrollTouch() {
-  if (currentPage != PAGE_NOTES) {
+  if (currentPage >= 3 || pageLayouts[currentPage] != LAYOUT_FULL_NOTES) {
     notesFingerDown = false;
     return;
   }
@@ -3132,61 +3199,124 @@ void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
   pushSpriteAndDelete(sprSmall, x, y);
 }
 
-void drawHomeSlotWidget(int slot, bool force = false) {
-  int x, y, w, h;
-  getHomeSlotRect(slot, x, y, w, h);
+void drawWaterHomeWidget(int x, int y, int w, int h, String &cacheVar, bool force = false) {
+  int displayCount = min(waterCount, waterGoal);
+  bool goalReached = (waterCount >= waterGoal && waterGoal > 0);
+  String combined = String(waterCount) + "|" + String(waterGoal);
+  if (!force && combined == cacheVar) return;
+  cacheVar = combined;
 
-  switch (homeWidgetSlots[slot]) {
+  TFT_eSprite sprSmall = TFT_eSprite(&tft);
+  makeSpriteCard(sprSmall, w, h, goalReached); // accent border if goal reached
+
+  // Header text
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.setTextDatum(TC_DATUM);
+  sprSmall.drawString("Su Takibi", w / 2, 6, 1);
+
+  // Glass outline
+  int gx = 10;
+  int gy = 18;
+  int gw = 26;
+  int gh = 40;
+
+  // Fill water level
+  if (displayCount > 0) {
+    float p = (float)displayCount / waterGoal;
+    if (p > 1.0f) p = 1.0f;
+    int fillH = (int)(p * (gh - 4));
+    if (fillH > 0) {
+      sprSmall.fillRoundRect(gx + 2, gy + (gh - 2 - fillH), gw - 4, fillH, 2, goalReached ? COL_ACCENT : COL_ACCENT);
+    }
+  }
+
+  // Draw glass border on top of fill
+  sprSmall.drawRoundRect(gx, gy, gw, gh, 3, COL_STROKE);
+  sprSmall.drawLine(gx, gy + 6, gx + gw - 1, gy + 6, COL_DIM);
+
+  // Count text
+  sprSmall.setTextColor(goalReached ? COL_ACCENT : COL_TEXT, COL_PANEL);
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.drawString(String(waterCount) + "/" + String(waterGoal), gx + gw + 6, gy + 2, 2);
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("bardak", gx + gw + 6, gy + 22, 1);
+
+  // Goal reached congrats (no animation, no lag!)
+  if (goalReached) {
+    sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
+    sprSmall.setTextDatum(TC_DATUM);
+    sprSmall.drawString("Tebrikler!", w / 2, h - 14, 1);
+  } else {
+    // Left / right hints
+    sprSmall.setTextColor(COL_DIM, COL_PANEL);
+    sprSmall.setTextDatum(TL_DATUM);
+    sprSmall.drawString("-", 4, h - 14, 1);
+    sprSmall.drawString("+", w - 10, h - 14, 1);
+  }
+
+  pushSpriteAndDelete(sprSmall, x, y);
+}
+
+void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
+  if (pageLayouts[pageIdx] == LAYOUT_GRID && slot >= 4) return;
+
+  int x, y, w, h;
+  getHomeSlotRect(pageIdx, slot, x, y, w, h);
+
+  switch (pageWidgetSlots[pageIdx][slot]) {
   case HOME_WIDGET_HUMIDITY:
     drawWeatherStyleMetricSprite(x, y, w, h,
                                  homeWidgetLabel(HOME_WIDGET_HUMIDITY),
-                                 humidityText(), cacheHomeSlots[slot], force);
+                                 humidityText(), cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_TIMER:
-    drawFocusTimerWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawFocusTimerWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_RAIN:
     drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_RAIN),
-                                 rainText(), cacheHomeSlots[slot], force);
+                                 rainText(), cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_OUTDOOR:
-    drawOutdoorHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawOutdoorHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_KP:
     drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_KP),
-                                 kpText(), cacheHomeSlots[slot], force,
+                                 kpText(), cachePageWidgets[pageIdx][slot], force,
                                  kpLevelText());
     break;
   case HOME_WIDGET_UV:
     drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_UV),
-                                 uvText(), cacheHomeSlots[slot], force,
+                                 uvText(), cachePageWidgets[pageIdx][slot], force,
                                  uvLevelText());
     break;
   case HOME_WIDGET_WIND:
     drawWeatherStyleMetricSprite(x, y, w, h, homeWidgetLabel(HOME_WIDGET_WIND),
-                                 windText(), cacheHomeSlots[slot], force,
+                                 windText(), cachePageWidgets[pageIdx][slot], force,
                                  windDirectionText());
     break;
   case HOME_WIDGET_SUN:
-    drawSunEventWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawSunEventWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_FINANCE:
-    drawFinanceHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawFinanceHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_BUDDY:
-    drawBuddyHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawBuddyHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_NOTES:
-    drawNotesHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawNotesHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_CALENDAR:
-    drawCalendarHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawCalendarHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_SPOTIFY:
-    drawSpotifyHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawSpotifyHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_GITHUB:
-    drawGithubHomeWidget(x, y, w, h, cacheHomeSlots[slot], force);
+    drawGithubHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
+    break;
+  case HOME_WIDGET_WATER:
+    drawWaterHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   }
 }
@@ -3303,9 +3433,9 @@ void drawTimerDoneOverlay(bool force = false) {
 // =========================================================
 // PAGES
 // =========================================================
-void drawHomePageFull() {
+void drawGridPageFull(int pageIdx) {
   tft.fillScreen(COL_BG);
-  drawTopBar(homeTitleText());
+  drawTopBar(tabNames[pageIdx]);
   drawNavBar();
 
   cacheClock = "";
@@ -3313,15 +3443,17 @@ void drawHomePageFull() {
   cacheHomeEmpty2 = "";
   cacheFocusTimer = "";
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    cacheHomeSlots[i] = "";
+    cachePageWidgets[pageIdx][i] = "";
   }
 
   pageDirty = false;
-  lastDrawnPage = PAGE_HOME;
+  lastDrawnPage = currentPage;
 
-  drawClockCardSprite(true);
+  if (pageLayouts[pageIdx] == LAYOUT_GRID) {
+    drawClockCardSprite(true);
+  }
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    drawHomeSlotWidget(i, true);
+    drawGridSlotWidget(pageIdx, i, true);
   }
   if (focusMenuOpen)
     drawFocusMenuOverlay(true);
@@ -3329,7 +3461,7 @@ void drawHomePageFull() {
     drawTimerDoneOverlay(true);
 }
 
-void updateHomeDynamic() {
+void updateGridDynamic(int pageIdx) {
   if (timerDoneDialogOpen) {
     drawTimerDoneOverlay(false);
     return;
@@ -3340,9 +3472,11 @@ void updateHomeDynamic() {
     return;
   }
 
-  drawClockCardSprite(false);
+  if (pageLayouts[pageIdx] == LAYOUT_GRID) {
+    drawClockCardSprite(false);
+  }
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-    drawHomeSlotWidget(i, false);
+    drawGridSlotWidget(pageIdx, i, false);
   }
 }
 
@@ -3359,7 +3493,7 @@ void drawWeatherPageFull() {
   drawCard(124, PAGE_ROW3_Y, 108, PAGE_WIDGET_H, true);
 
   pageDirty = false;
-  lastDrawnPage = PAGE_WEATHER;
+  lastDrawnPage = currentPage;
 
   lastTempText = "";
   lastRainText = "";
@@ -3469,7 +3603,7 @@ void drawNotesPageFull() {
   drawCard(8, 42, 224, 226, true);
 
   pageDirty = false;
-  lastDrawnPage = PAGE_NOTES;
+  lastDrawnPage = currentPage;
   lastNotesText = "";
   notesFingerDown = false;
   notesViewportDirty = true;
@@ -3576,22 +3710,20 @@ void updateStatusDynamic() {
 }
 
 void drawCurrentPageFull() {
-  switch (currentPage) {
-  case PAGE_HOME:
-    drawHomePageFull();
-    break;
-  case PAGE_WEATHER:
-    drawWeatherPageFull();
-    break;
-  case PAGE_NOTES:
-    drawNotesPageFull();
-    break;
-  case PAGE_STATUS:
+  if (currentPage == PAGE_STATUS) {
     drawStatusPageFull();
-    break;
+  } else {
+    int pageIdx = (int)currentPage;
+    if (pageLayouts[pageIdx] == LAYOUT_GRID || pageLayouts[pageIdx] == LAYOUT_GRID_6) {
+      drawGridPageFull(pageIdx);
+    } else if (pageLayouts[pageIdx] == LAYOUT_FULL_WEATHER) {
+      drawWeatherPageFull();
+    } else if (pageLayouts[pageIdx] == LAYOUT_FULL_NOTES) {
+      drawNotesPageFull();
+    }
   }
 
-  if (focusMenuOpen && currentPage == PAGE_HOME)
+  if (focusMenuOpen && currentPage < 3 && (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6))
     drawFocusMenuOverlay(true);
   if (timerDoneDialogOpen)
     drawTimerDoneOverlay(true);
@@ -3610,24 +3742,22 @@ void updateCurrentPageDynamic() {
     return;
   }
 
-  if (focusMenuOpen && currentPage == PAGE_HOME) {
+  if (focusMenuOpen && currentPage < 3 && (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6)) {
     drawFocusMenuOverlay(false);
     return;
   }
 
-  switch (currentPage) {
-  case PAGE_HOME:
-    updateHomeDynamic();
-    break;
-  case PAGE_WEATHER:
-    updateWeatherDynamic();
-    break;
-  case PAGE_NOTES:
-    updateNotesDynamic();
-    break;
-  case PAGE_STATUS:
+  if (currentPage == PAGE_STATUS) {
     updateStatusDynamic();
-    break;
+  } else {
+    int pageIdx = (int)currentPage;
+    if (pageLayouts[pageIdx] == LAYOUT_GRID || pageLayouts[pageIdx] == LAYOUT_GRID_6) {
+      updateGridDynamic(pageIdx);
+    } else if (pageLayouts[pageIdx] == LAYOUT_FULL_WEATHER) {
+      updateWeatherDynamic();
+    } else if (pageLayouts[pageIdx] == LAYOUT_FULL_NOTES) {
+      updateNotesDynamic();
+    }
   }
 }
 
@@ -3681,34 +3811,55 @@ bool handleFocusMenuTouch(int x, int y) {
   return true;
 }
 
-bool handleHomeTouch(int x, int y) {
-  if (currentPage != PAGE_HOME)
-    return false;
-
+bool handleGridTouch(int pageIdx, int x, int y) {
   if (focusMenuOpen)
     return handleFocusMenuTouch(x, y);
 
   for (int slot = 0; slot < HOME_SLOT_COUNT; slot++) {
-    if (homeWidgetSlots[slot] != HOME_WIDGET_TIMER)
-      continue;
-
     int slotX, slotY, slotW, slotH;
-    getHomeSlotRect(slot, slotX, slotY, slotW, slotH);
+    getHomeSlotRect(pageIdx, slot, slotX, slotY, slotW, slotH);
 
-    if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
-      if (focusTimerFinished) {
-        resetFocusTimer();
-      } else {
-        focusMenuOpen = true;
-        cacheFocusTimer = "";
-        clearHomeSlotCaches();
-        cacheTimerMenu = "";
+    if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_TIMER) {
+      if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
+        if (focusTimerFinished) {
+          resetFocusTimer();
+        } else {
+          focusMenuOpen = true;
+          cacheFocusTimer = "";
+          clearHomeSlotCaches();
+          cacheTimerMenu = "";
+        }
+        pageDirty = true;
+        return true;
       }
-      pageDirty = true;
-      return true;
+    } else if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_WATER) {
+      if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
+        if (x < slotX + slotW / 2) {
+          if (waterCount > 0) waterCount--;
+        } else {
+          waterCount++;
+          // No confetti - just accent border via goalReached
+        }
+        prefs.putInt("w_cnt", waterCount);
+        cachePageWidgets[pageIdx][slot] = "";
+        pageDirty = true;
+        return true;
+      }
     }
   }
 
+  return false;
+}
+
+bool handlePageTouch(int x, int y) {
+  if (currentPage == PAGE_STATUS) {
+    return handleStatusTouch(x, y);
+  } else {
+    int pageIdx = (int)currentPage;
+    if (pageLayouts[pageIdx] == LAYOUT_GRID || pageLayouts[pageIdx] == LAYOUT_GRID_6) {
+      return handleGridTouch(pageIdx, x, y);
+    }
+  }
   return false;
 }
 
@@ -3971,8 +4122,14 @@ void hwScrollTo(uint16_t vsp) {
 
 void animatePageTransition(Page oldP, Page newP) {
   bool slideUp = (newP > oldP);
-  const int tfa = TOPBAR_H;
-  const int vsa = SCREEN_H - TOPBAR_H - NAV_H;
+  int tfa = TOPBAR_H;
+  
+  // If both pages are regular grids, keep the clock stationary!
+  if (oldP < 3 && newP < 3 && pageLayouts[(int)oldP] == LAYOUT_GRID && pageLayouts[(int)newP] == LAYOUT_GRID) {
+    tfa = PAGE_ROW2_Y; // Keep TopBar + Clock fixed
+  }
+
+  const int vsa = SCREEN_H - tfa - NAV_H;
   const int bfa = NAV_H;
 
   hwSetupScrollArea(tfa, vsa, bfa);
@@ -4003,6 +4160,44 @@ void loop() {
   handleAutoSleep();
 
   int tx = 0, ty = 0;
+
+  // Long-press detection for water widget reset
+  {
+    int rx = 0, ry = 0;
+    bool rawDown = readTouchXY(rx, ry);
+    if (rawDown && !sleepOff && currentPage < 3 &&
+        (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6)) {
+      int pageIdx = (int)currentPage;
+      if (!waterLongPressActive) {
+        // Check if touching a water widget slot
+        for (int s = 0; s < HOME_SLOT_COUNT; s++) {
+          if (pageWidgetSlots[pageIdx][s] != HOME_WIDGET_WATER) continue;
+          int sx, sy, sw, sh;
+          getHomeSlotRect(pageIdx, s, sx, sy, sw, sh);
+          if (rx >= sx && rx < sx + sw && ry >= sy && ry < sy + sh) {
+            waterLongPressActive = true;
+            waterTouchDownMs = millis();
+            waterLongPressPage = pageIdx;
+            waterLongPressSlot = s;
+            break;
+          }
+        }
+      } else {
+        // Already tracking a long press - check if held long enough
+        if (millis() - waterTouchDownMs >= 800) {
+          waterCount = 0;
+          prefs.putInt("w_cnt", waterCount);
+          if (waterLongPressPage >= 0 && waterLongPressSlot >= 0)
+            cachePageWidgets[waterLongPressPage][waterLongPressSlot] = "";
+          pageDirty = true;
+          waterLongPressActive = false; // Reset so it only fires once
+        }
+      }
+    } else {
+      waterLongPressActive = false;
+    }
+  }
+
   if (touchNewPress(tx, ty)) {
     lastInteractionMs = millis();
 
@@ -4043,12 +4238,12 @@ void loop() {
         if (!manualDimMode) {
           wakeDisplay(true);
         } else {
-          if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
+          if (!handlePageTouch(tx, ty)) {
             handleNavTouch(tx, ty);
           }
         }
       } else {
-        if (!handleHomeTouch(tx, ty) && !handleStatusTouch(tx, ty)) {
+        if (!handlePageTouch(tx, ty)) {
           handleNavTouch(tx, ty);
         }
       }
@@ -4058,6 +4253,19 @@ void loop() {
   if (millis() - lastDataTick >= DATA_TICK_MS) {
     lastDataTick = millis();
     ensureSunTimesForToday();
+    
+    time_t now = time(nullptr);
+    struct tm tmNow;
+    localtime_r(&now, &tmNow);
+    if (tmNow.tm_year > 100) { // Valid time
+      if (lastWaterDay != tmNow.tm_yday) {
+        lastWaterDay = tmNow.tm_yday;
+        waterCount = 0;
+        prefs.putInt("w_day", lastWaterDay);
+        prefs.putInt("w_cnt", waterCount);
+        pageDirty = true;
+      }
+    }
     ensureWeather();
     if (isWidgetActive(HOME_WIDGET_KP))
       ensureKpIndex();
@@ -4081,13 +4289,14 @@ void loop() {
     dataDirty = false;
   }
 
-  if (currentPage == PAGE_HOME && !focusMenuOpen && !timerDoneDialogOpen &&
+  if (currentPage < 3 && (pageLayouts[currentPage] == LAYOUT_GRID || pageLayouts[currentPage] == LAYOUT_GRID_6) && !focusMenuOpen && !timerDoneDialogOpen &&
       !wifiForgetConfirmOpen && !sleepOff) {
     static unsigned long lastBuddyAnimMs = 0;
     bool needsAnim = false;
+    int p = (int)currentPage;
     for (int s = 0; s < HOME_SLOT_COUNT; s++) {
-      if (homeWidgetSlots[s] == HOME_WIDGET_BUDDY ||
-          (homeWidgetSlots[s] == HOME_WIDGET_SPOTIFY && spotifyPlaying)) {
+      if (pageWidgetSlots[p][s] == HOME_WIDGET_BUDDY ||
+          (pageWidgetSlots[p][s] == HOME_WIDGET_SPOTIFY && spotifyPlaying)) {
         needsAnim = true;
         break;
       }
@@ -4095,14 +4304,14 @@ void loop() {
     if (needsAnim && millis() - lastBuddyAnimMs >= 70UL) {
       lastBuddyAnimMs = millis();
       for (int s = 0; s < HOME_SLOT_COUNT; s++) {
-        if (homeWidgetSlots[s] == HOME_WIDGET_BUDDY ||
-            (homeWidgetSlots[s] == HOME_WIDGET_SPOTIFY && spotifyPlaying))
-          drawHomeSlotWidget(s, false);
+        if (pageWidgetSlots[p][s] == HOME_WIDGET_BUDDY ||
+            (pageWidgetSlots[p][s] == HOME_WIDGET_SPOTIFY && spotifyPlaying))
+          drawGridSlotWidget(p, s, false);
       }
     }
   }
 
-  if (currentPage == PAGE_NOTES && !sleepOff) {
+  if (currentPage < 3 && pageLayouts[currentPage] == LAYOUT_FULL_NOTES && !sleepOff) {
     updateNotesDynamic();
   }
 

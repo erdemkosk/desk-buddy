@@ -16,10 +16,11 @@ enum HomeWidgetType {
   HOME_WIDGET_NOTES,
   HOME_WIDGET_CALENDAR,
   HOME_WIDGET_SPOTIFY,
-  HOME_WIDGET_GITHUB
+  HOME_WIDGET_GITHUB,
+  HOME_WIDGET_WATER
 };
 
-constexpr int HOME_SLOT_COUNT = 4;
+constexpr int HOME_SLOT_COUNT = 6;
 
 /** Open-Meteo WMO weather_code */
 enum WxKind {
@@ -36,4 +37,11 @@ enum WxKind {
   WX_THUNDER
 };
 
-enum Page { PAGE_HOME = 0, PAGE_WEATHER = 1, PAGE_NOTES = 2, PAGE_STATUS = 3 };
+enum PageLayout {
+  LAYOUT_GRID = 0,
+  LAYOUT_FULL_WEATHER = 1,
+  LAYOUT_FULL_NOTES = 2,
+  LAYOUT_GRID_6 = 3
+};
+
+enum Page { PAGE_TAB_0 = 0, PAGE_TAB_1 = 1, PAGE_TAB_2 = 2, PAGE_STATUS = 3 };
