@@ -162,8 +162,12 @@ bool isWidgetActive(HomeWidgetType type) {
 int waterCount = 0;
 int waterGoal = 8;
 int lastWaterDay = -1;
-bool waterConfettiActive = false;
-unsigned long waterConfettiStartMs = 0;
+
+// Water widget long-press state
+static bool waterLongPressActive = false;
+static unsigned long waterTouchDownMs = 0;
+static int waterLongPressPage = -1;
+static int waterLongPressSlot = -1;
 
 Page currentPage = PAGE_TAB_0;
 Page lastDrawnPage = (Page)-1;
@@ -3171,18 +3175,14 @@ void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
 }
 
 void drawWaterHomeWidget(int x, int y, int w, int h, String &cacheVar, bool force = false) {
-  // Handle confetti timeout first
-  if (waterConfettiActive && (millis() - waterConfettiStartMs > 2500)) {
-    waterConfettiActive = false;
-  }
-
   int displayCount = min(waterCount, waterGoal);
-  String combined = String(waterCount) + "|" + String(waterGoal) + "|" + String(waterConfettiActive ? (millis() / 80) : 0);
+  bool goalReached = (waterCount >= waterGoal && waterGoal > 0);
+  String combined = String(waterCount) + "|" + String(waterGoal);
   if (!force && combined == cacheVar) return;
   cacheVar = combined;
 
   TFT_eSprite sprSmall = TFT_eSprite(&tft);
-  makeSpriteCard(sprSmall, w, h);
+  makeSpriteCard(sprSmall, w, h, goalReached); // accent border if goal reached
 
   // Header text
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
@@ -3190,49 +3190,43 @@ void drawWaterHomeWidget(int x, int y, int w, int h, String &cacheVar, bool forc
   sprSmall.drawString("Su Takibi", w / 2, 6, 1);
 
   // Glass outline
-  int gx = 16;
+  int gx = 10;
   int gy = 18;
   int gw = 26;
   int gh = 40;
-  
+
   // Fill water level
   if (displayCount > 0) {
     float p = (float)displayCount / waterGoal;
     if (p > 1.0f) p = 1.0f;
     int fillH = (int)(p * (gh - 4));
     if (fillH > 0) {
-      sprSmall.fillRoundRect(gx + 2, gy + (gh - 2 - fillH), gw - 4, fillH, 2, COL_ACCENT);
+      sprSmall.fillRoundRect(gx + 2, gy + (gh - 2 - fillH), gw - 4, fillH, 2, goalReached ? COL_ACCENT : COL_ACCENT);
     }
   }
 
   // Draw glass border on top of fill
   sprSmall.drawRoundRect(gx, gy, gw, gh, 3, COL_STROKE);
-  sprSmall.drawLine(gx, gy + 6, gx + gw - 1, gy + 6, COL_DIM); // "rim" of glass
+  sprSmall.drawLine(gx, gy + 6, gx + gw - 1, gy + 6, COL_DIM);
 
   // Count text
-  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  sprSmall.setTextColor(goalReached ? COL_ACCENT : COL_TEXT, COL_PANEL);
   sprSmall.setTextDatum(TL_DATUM);
-  sprSmall.drawString(String(waterCount) + "/" + String(waterGoal), gx + gw + 8, gy + 4, 2);
+  sprSmall.drawString(String(waterCount) + "/" + String(waterGoal), gx + gw + 6, gy + 2, 2);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString("bardak", gx + gw + 8, gy + 22, 1);
+  sprSmall.drawString("bardak", gx + gw + 6, gy + 22, 1);
 
-  // Left half hint: minus, right half hint: plus
-  sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.setTextDatum(TL_DATUM);
-  sprSmall.drawString("-", 4, h - 14, 1);
-  sprSmall.drawString("+", w - 10, h - 14, 1);
-
-  // Confetti Animation
-  if (waterConfettiActive) {
-    unsigned long elapsed = millis() - waterConfettiStartMs;
-    for (int i = 0; i < 18; i++) {
-      int cx = (i * 41 + 7) % (w - 4);
-      int cy = (int)((elapsed * (15 + (i * 7) % 12)) / 1000) % h;
-      uint16_t cColor = (i % 3 == 0) ? COL_ACCENT : ((i % 3 == 1) ? TFT_YELLOW : TFT_CYAN);
-      if (cy >= 0 && cy < h - 2) sprSmall.fillRect(cx, cy, 3, 3, cColor);
-    }
-    // Redraw border on top of confetti
-    sprSmall.drawRoundRect(0, 0, w, h, 10, COL_STROKE);
+  // Goal reached congrats (no animation, no lag!)
+  if (goalReached) {
+    sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
+    sprSmall.setTextDatum(TC_DATUM);
+    sprSmall.drawString("Tebrikler!", w / 2, h - 14, 1);
+  } else {
+    // Left / right hints
+    sprSmall.setTextColor(COL_DIM, COL_PANEL);
+    sprSmall.setTextDatum(TL_DATUM);
+    sprSmall.drawString("-", 4, h - 14, 1);
+    sprSmall.drawString("+", w - 10, h - 14, 1);
   }
 
   pushSpriteAndDelete(sprSmall, x, y);
@@ -3816,18 +3810,13 @@ bool handleGridTouch(int pageIdx, int x, int y) {
     } else if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_WATER) {
       if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
         if (x < slotX + slotW / 2) {
-          // Decrement
           if (waterCount > 0) waterCount--;
         } else {
-          // Increment
           waterCount++;
-          if (waterCount == waterGoal) {
-            waterConfettiActive = true;
-            waterConfettiStartMs = millis();
-          }
+          // No confetti - just accent border via goalReached
         }
         prefs.putInt("w_cnt", waterCount);
-        cachePageWidgets[pageIdx][slot] = ""; // Force redraw
+        cachePageWidgets[pageIdx][slot] = "";
         pageDirty = true;
         return true;
       }
@@ -4146,6 +4135,44 @@ void loop() {
   handleAutoSleep();
 
   int tx = 0, ty = 0;
+
+  // Long-press detection for water widget reset
+  {
+    int rx = 0, ry = 0;
+    bool rawDown = readTouchXY(rx, ry);
+    if (rawDown && !sleepOff && currentPage < 3 &&
+        (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6)) {
+      int pageIdx = (int)currentPage;
+      if (!waterLongPressActive) {
+        // Check if touching a water widget slot
+        for (int s = 0; s < HOME_SLOT_COUNT; s++) {
+          if (pageWidgetSlots[pageIdx][s] != HOME_WIDGET_WATER) continue;
+          int sx, sy, sw, sh;
+          getHomeSlotRect(pageIdx, s, sx, sy, sw, sh);
+          if (rx >= sx && rx < sx + sw && ry >= sy && ry < sy + sh) {
+            waterLongPressActive = true;
+            waterTouchDownMs = millis();
+            waterLongPressPage = pageIdx;
+            waterLongPressSlot = s;
+            break;
+          }
+        }
+      } else {
+        // Already tracking a long press - check if held long enough
+        if (millis() - waterTouchDownMs >= 800) {
+          waterCount = 0;
+          prefs.putInt("w_cnt", waterCount);
+          if (waterLongPressPage >= 0 && waterLongPressSlot >= 0)
+            cachePageWidgets[waterLongPressPage][waterLongPressSlot] = "";
+          pageDirty = true;
+          waterLongPressActive = false; // Reset so it only fires once
+        }
+      }
+    } else {
+      waterLongPressActive = false;
+    }
+  }
+
   if (touchNewPress(tx, ty)) {
     lastInteractionMs = millis();
 
