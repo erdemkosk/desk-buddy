@@ -1842,62 +1842,94 @@ static bool fetchGithubData() {
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   bool got = false;
+
+  // ---- Step 1: Fetch only 'total' (lastYear) from the full-year endpoint ----
   String url = "https://github-contributions-api.jogruber.de/v4/" + githubUser + "?y=last";
   if (http.begin(client, url)) {
-    if (http.GET() == 200) {
-      String payload = http.getString();
+    int code = http.GET();
+    if (code == 200) {
+      // Stream-read: we only need the beginning and the END of the payload
+      // The total is at the very start, entries at the end
+      WiFiClient *stream = http.getStreamPtr();
+      String header = "";
+      // Read up to 64 bytes to capture {"total":{"lastYear":NNN}
+      int headerRead = 0;
+      while (stream->available() && headerRead < 64) {
+        header += (char)stream->read();
+        headerRead++;
+      }
+
+      int parsedLastYear = 0;
+      int tyIdx = header.indexOf("\"lastYear\":");
+      if (tyIdx != -1) {
+        int vStart = tyIdx + 11;
+        while (vStart < (int)header.length() && !isDigit(header[vStart])) vStart++;
+        int vEnd = vStart;
+        while (vEnd < (int)header.length() && isDigit(header[vEnd])) vEnd++;
+        if (vEnd > vStart) parsedLastYear = header.substring(vStart, vEnd).toInt();
+      }
+
+      // Read rest into a rolling buffer - we only care about the last 14 entries
+      // Each entry is ~40 bytes, so we need the last ~600 bytes of the response
+      const int TAIL_SIZE = 800;
+      String tail = "";
+      tail.reserve(TAIL_SIZE + 64);
+
+      // Continue reading header
+      while (stream->available()) {
+        char c = stream->read();
+        tail += c;
+        if ((int)tail.length() > TAIL_SIZE + 64) {
+          tail = tail.substring(tail.length() - TAIL_SIZE);
+        }
+        vTaskDelay(1 / portTICK_PERIOD_MS);
+      }
+
+      // Parse entries from the tail
       uint8_t tempLevels[14] = {0};
       int tempCounts[14] = {0};
       int count = 0;
 
-      int tyIdx = payload.indexOf("\"lastYear\":");
-      int parsedLastYear = 0;
-      if (tyIdx != -1) {
-        tyIdx += 11;
-        int eIdx = tyIdx;
-        while (eIdx < payload.length() && isDigit(payload[eIdx])) eIdx++;
-        if (eIdx > tyIdx) parsedLastYear = payload.substring(tyIdx, eIdx).toInt();
-      }
-
-      int idx = payload.indexOf("{\"date\":");
+      int idx = tail.indexOf("{\"date\":");
       while (idx != -1) {
-        int cIdx = payload.indexOf("\"count\":", idx);
+        int entryEnd = tail.indexOf("}", idx);
+        if (entryEnd == -1) entryEnd = idx + 200;
+        else entryEnd += 1;
+
+        int cIdx = tail.indexOf("\"count\":", idx);
         int cVal = 0;
-        if (cIdx != -1 && cIdx < idx + 50) {
-           cIdx += 8;
-           int eIdx = cIdx;
-           while(eIdx < payload.length() && isDigit(payload[eIdx])) eIdx++;
-           if (eIdx > cIdx) cVal = payload.substring(cIdx, eIdx).toInt();
-        }
-        
-        int lIdx = payload.indexOf("\"level\":", idx);
-        int lVal = 0;
-        if (lIdx != -1 && lIdx < idx + 50) {
-           lIdx += 8;
-           int eIdx = lIdx;
-           while(eIdx < payload.length() && isDigit(payload[eIdx])) eIdx++;
-           if (eIdx > lIdx) lVal = payload.substring(lIdx, eIdx).toInt();
+        if (cIdx != -1 && cIdx < entryEnd) {
+          cIdx += 8;
+          int eIdx = cIdx;
+          while (eIdx < (int)tail.length() && isDigit(tail[eIdx])) eIdx++;
+          if (eIdx > cIdx) cVal = tail.substring(cIdx, eIdx).toInt();
         }
 
-        if (cIdx != -1 && lIdx != -1) {
-          tempLevels[count % 14] = (uint8_t)lVal;
-          tempCounts[count % 14] = cVal;
-          count++;
+        int lIdx = tail.indexOf("\"level\":", idx);
+        int lVal = 0;
+        if (lIdx != -1 && lIdx < entryEnd) {
+          lIdx += 8;
+          int eIdx = lIdx;
+          while (eIdx < (int)tail.length() && isDigit(tail[eIdx])) eIdx++;
+          if (eIdx > lIdx) lVal = tail.substring(lIdx, eIdx).toInt();
         }
-        
-        idx = payload.indexOf("{\"date\":", lIdx);
-        vTaskDelay(1 / portTICK_PERIOD_MS); // Feed the watchdog
+
+        tempLevels[count % 14] = (uint8_t)lVal;
+        tempCounts[count % 14] = cVal;
+        count++;
+
+        idx = tail.indexOf("{\"date\":", entryEnd);
       }
-      
-      if (count > 0) {
+
+      if (count > 0 || parsedLastYear > 0) {
         if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
-          // Unwrap the circular buffer so githubLevels[13] is the most recent day
           for (int i = 0; i < 14; i++) {
             githubLevels[i] = tempLevels[(count + i) % 14];
             githubCounts[i] = tempCounts[(count + i) % 14];
           }
-          githubTotalLastYear = parsedLastYear;
+          if (parsedLastYear > 0) githubTotalLastYear = parsedLastYear;
           lastGithubFetch = time(nullptr);
+          lastSyncTime = lastGithubFetch;
           xSemaphoreGive(githubMutex);
         }
         got = true;
@@ -1907,13 +1939,6 @@ static bool fetchGithubData() {
     http.end();
   }
 
-  if (got || githubUser.length() >= 2) {
-    if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
-      lastGithubFetch = time(nullptr);
-      lastSyncTime = lastGithubFetch;
-      xSemaphoreGive(githubMutex);
-    }
-  }
   return got;
 }
 
