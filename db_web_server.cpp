@@ -52,6 +52,8 @@ extern time_t lastSpotifyFetch;
 extern String githubUser;
 extern time_t lastGithubFetch;
 
+extern int waterGoal;
+
 extern bool notesDirty;
 extern bool pageDirty;
 extern bool dataDirty;
