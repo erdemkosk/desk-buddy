@@ -2360,15 +2360,30 @@ void drawNavBar() {
 
 void makeSpriteCard(TFT_eSprite &spr, int w, int h, bool accent = false) {
   spr.setColorDepth(16);
-  spr.createSprite(w, h);
-  spr.fillSprite(COL_BG);
-  spr.fillRoundRect(0, 0, w, h, 10, COL_PANEL);
-  spr.drawRoundRect(0, 0, w, h, 10, accent ? COL_ACCENT : COL_STROKE);
+  if (spr.width() != w || spr.height() != h) {
+    spr.deleteSprite();
+    spr.createSprite(w, h);
+  }
+  if (spr.getPointer()) {
+    spr.fillSprite(COL_BG);
+    spr.fillRoundRect(0, 0, w, h, 10, COL_PANEL);
+    spr.drawRoundRect(0, 0, w, h, 10, accent ? COL_ACCENT : COL_STROKE);
+  }
 }
 
+void pushSpriteToScreen(TFT_eSprite &spr, int x, int y) {
+  if (spr.getPointer()) {
+    spr.pushSprite(x, y, COL_BG);
+  }
+}
+
+// Geriye donuk uyumluluk icin
 void pushSpriteAndDelete(TFT_eSprite &spr, int x, int y) {
-  spr.pushSprite(x, y, COL_BG);
-  spr.deleteSprite();
+  pushSpriteToScreen(spr, x, y);
+}
+
+void pushSpriteAndKeep(TFT_eSprite &spr, int x, int y) {
+  pushSpriteToScreen(spr, x, y);
 }
 
 void drawFinanceHomeWidget(int x, int y, int w, int h, String &cache,
@@ -2947,7 +2962,8 @@ void drawClockCardSprite(bool force = false) {
 
   if (!force && combined == cacheClock)
     return;
-  cacheClock = combined;
+  // cacheClock = combined; // CIZIM BASARILI OLUNCA SONDA GUNCELLE
+
 
   makeSpriteCard(sprClock, w, h, true);
 
@@ -2977,7 +2993,8 @@ void drawClockCardSprite(bool force = false) {
   sprClock.drawString(sr, 165, 15, 2);
   sprClock.drawString(ss, 165, 43, 2);
 
-  pushSpriteAndDelete(sprClock, x, y);
+  pushSpriteAndKeep(sprClock, x, y);
+  cacheClock = combined; // Simdi guncelle
 }
 
 void drawMetricSprite(int x, int y, int w, int h, const char *label,
@@ -2989,23 +3006,19 @@ void drawMetricSprite(int x, int y, int w, int h, const char *label,
 
   if (!force && combined == cache)
     return;
-  cache = combined;
 
   makeSpriteCard(sprSmall, w, h, true);
-
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
   sprSmall.drawString(label, 10, 8, 2);
-
   sprSmall.setTextColor(COL_TEXT, COL_PANEL);
   sprSmall.drawString(value, 10, 31, 4);
-
   if (detail.length() > 0) {
     sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
     sprSmall.drawString(detail, 10, 55, 1);
   }
-
-  pushSpriteAndDelete(sprSmall, x, y);
+  pushSpriteToScreen(sprSmall, x, y);
+  cache = combined;
 }
 
 void drawWeatherStyleMetricSprite(int x, int y, int w, int h, const char *label,
@@ -3018,23 +3031,19 @@ void drawWeatherStyleMetricSprite(int x, int y, int w, int h, const char *label,
 
   if (!force && combined == cache)
     return;
-  cache = combined;
 
   makeSpriteCard(sprSmall, w, h, true);
-
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
   sprSmall.drawString(label, 10, 8, 2);
-
   sprSmall.setTextColor(COL_TEXT, COL_PANEL);
   sprSmall.drawString(value, 10, 28, 4);
-
   if (detail.length() > 0) {
     sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
-    sprSmall.drawString(detail, 10, 58, 1); // 52'den 58'e cekildi (Daha iyi bosluk)
+    sprSmall.drawString(detail, 10, 58, 1);
   }
-
-  pushSpriteAndDelete(sprSmall, x, y);
+  pushSpriteToScreen(sprSmall, x, y);
+  cache = combined;
 }
 
 void drawSunEventWidget(int x, int y, int w, int h, String &cache,
@@ -3440,7 +3449,8 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
     + "|" + String(localOnline ? 1 : 0);
   // Oynarken surekli guncelle (scrolling icin); oynamiyorsa cache ile karsilastir
   if (!force && !playing && combined == cache) return;
-  if (!playing) cache = combined;
+  // cache = combined; // SONDA GUNCELLE
+
 
   makeSpriteCard(sprSmall, w, h, true); // her zaman accent cerceve
 
@@ -3524,7 +3534,8 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
     }
   }
 
-  pushSpriteAndDelete(sprSmall, x, y);
+  pushSpriteToScreen(sprSmall, x, y);
+  if (!playing) cache = combined;
 }
 
 void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
