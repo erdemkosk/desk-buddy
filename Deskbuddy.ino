@@ -3171,8 +3171,13 @@ void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
 }
 
 void drawWaterHomeWidget(int x, int y, int w, int h, String &cacheVar, bool force = false) {
+  // Handle confetti timeout first
+  if (waterConfettiActive && (millis() - waterConfettiStartMs > 2500)) {
+    waterConfettiActive = false;
+  }
+
   int displayCount = min(waterCount, waterGoal);
-  String combined = String(waterCount) + "|" + String(waterGoal) + "|" + String(waterConfettiActive ? millis() : 0);
+  String combined = String(waterCount) + "|" + String(waterGoal) + "|" + String(waterConfettiActive ? (millis() / 80) : 0);
   if (!force && combined == cacheVar) return;
   cacheVar = combined;
 
@@ -3184,13 +3189,11 @@ void drawWaterHomeWidget(int x, int y, int w, int h, String &cacheVar, bool forc
   sprSmall.setTextDatum(TC_DATUM);
   sprSmall.drawString("Su Takibi", w / 2, 6, 1);
 
-  // Glass
+  // Glass outline
   int gx = 16;
-  int gy = 24;
-  int gw = 24;
-  int gh = 36;
-  
-  sprSmall.drawRoundRect(gx, gy, gw, gh, 2, COL_DIM);
+  int gy = 18;
+  int gw = 26;
+  int gh = 40;
   
   // Fill water level
   if (displayCount > 0) {
@@ -3198,28 +3201,38 @@ void drawWaterHomeWidget(int x, int y, int w, int h, String &cacheVar, bool forc
     if (p > 1.0f) p = 1.0f;
     int fillH = (int)(p * (gh - 4));
     if (fillH > 0) {
-      sprSmall.fillRoundRect(gx + 2, gy + (gh - 2 - fillH), gw - 4, fillH, 1, COL_ACCENT);
+      sprSmall.fillRoundRect(gx + 2, gy + (gh - 2 - fillH), gw - 4, fillH, 2, COL_ACCENT);
     }
   }
 
+  // Draw glass border on top of fill
+  sprSmall.drawRoundRect(gx, gy, gw, gh, 3, COL_STROKE);
+  sprSmall.drawLine(gx, gy + 6, gx + gw - 1, gy + 6, COL_DIM); // "rim" of glass
+
   // Count text
   sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  sprSmall.setTextDatum(ML_DATUM);
-  sprSmall.drawString(String(waterCount) + " / " + String(waterGoal), gx + gw + 12, gy + gh / 2, 2);
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.drawString(String(waterCount) + "/" + String(waterGoal), gx + gw + 8, gy + 4, 2);
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("bardak", gx + gw + 8, gy + 22, 1);
+
+  // Left half hint: minus, right half hint: plus
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.drawString("-", 4, h - 14, 1);
+  sprSmall.drawString("+", w - 10, h - 14, 1);
 
   // Confetti Animation
   if (waterConfettiActive) {
     unsigned long elapsed = millis() - waterConfettiStartMs;
-    if (elapsed > 2500) {
-      waterConfettiActive = false; 
-    } else {
-      for (int i = 0; i < 20; i++) {
-        int cx = (i * 37) % w;
-        int cy = ((elapsed * (20 + (i % 10))) / 1000) % (h + 10); 
-        uint16_t cColor = (i % 3 == 0) ? COL_ACCENT : ((i % 3 == 1) ? TFT_YELLOW : TFT_CYAN);
-        if (cy < h) sprSmall.fillRect(cx, cy, 3, 3, cColor);
-      }
+    for (int i = 0; i < 18; i++) {
+      int cx = (i * 41 + 7) % (w - 4);
+      int cy = (int)((elapsed * (15 + (i * 7) % 12)) / 1000) % h;
+      uint16_t cColor = (i % 3 == 0) ? COL_ACCENT : ((i % 3 == 1) ? TFT_YELLOW : TFT_CYAN);
+      if (cy >= 0 && cy < h - 2) sprSmall.fillRect(cx, cy, 3, 3, cColor);
     }
+    // Redraw border on top of confetti
+    sprSmall.drawRoundRect(0, 0, w, h, 10, COL_STROKE);
   }
 
   pushSpriteAndDelete(sprSmall, x, y);
@@ -3815,6 +3828,7 @@ bool handleGridTouch(int pageIdx, int x, int y) {
         }
         prefs.putInt("w_cnt", waterCount);
         cachePageWidgets[pageIdx][slot] = ""; // Force redraw
+        pageDirty = true;
         return true;
       }
     }
