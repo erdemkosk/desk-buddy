@@ -241,8 +241,10 @@ String steamCurrentGame = "";    // su an oynanan oyun (GetPlayerSummaries)
 bool   steamIsOnline = false;    // Steam'de online mi
 int steamPlaytime2Weeks = -1;    // dakika, -1 = bilinmiyor
 int steamPlaytimeForever = -1;   // dakika, toplam
-time_t lastSteamFetch = 0;
-const uint32_t STEAM_INTERVAL_SEC = 15 * 60; // 15 dk
+time_t lastSteamFetch = 0;         // son GetRecentlyPlayedGames zamani
+time_t lastSteamStatusFetch = 0;   // son GetPlayerSummaries zamani
+const uint32_t STEAM_STATUS_INTERVAL_SEC = 2 * 60;  // online/oynuyor: 2 dk
+const uint32_t STEAM_RECENT_INTERVAL_SEC = 30 * 60; // son oyun/sureler: 30 dk
 const unsigned long STEAM_ROTATE_MS = 8000UL; // mod ekrani donusu
 SemaphoreHandle_t steamMutex = NULL;
 
@@ -1965,21 +1967,20 @@ static bool fetchGithubData() {
 }
 
 
-static bool fetchSteamData() {
+static bool fetchSteamStatus() {
   if (WiFi.status() != WL_CONNECTED) return false;
   if (steamApiKey.length() < 10 || steamId.length() < 5) return false;
 
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(15000);
+  http.setTimeout(10000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
-  bool got = false;
-
-  // --- 1. Cevrimici durum + su an oynanan oyun ---
   String urlStatus = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key="
     + steamApiKey + "&steamids=" + steamId + "&format=json";
+
+  bool got = false;
   if (http.begin(client, urlStatus)) {
     if (http.GET() == 200) {
       String body = http.getString();
@@ -1995,6 +1996,7 @@ static bool fetchSteamData() {
         if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
           steamIsOnline = online;
           steamCurrentGame = curGame;
+          lastSteamStatusFetch = time(nullptr);
           xSemaphoreGive(steamMutex);
         }
         got = true;
@@ -2003,10 +2005,23 @@ static bool fetchSteamData() {
     }
     http.end();
   }
+  return got;
+}
 
-  // --- 2. Son oynanan oyun + sure ---
+static bool fetchSteamRecent() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  if (steamApiKey.length() < 10 || steamId.length() < 5) return false;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(15000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
   String urlRecent = "https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key="
     + steamApiKey + "&steamid=" + steamId + "&count=1&format=json";
+
+  bool got = false;
   if (http.begin(client, urlRecent)) {
     if (http.GET() == 200) {
       String body = http.getString();
@@ -2077,15 +2092,27 @@ void networkFetchTask(void *pvParameters) {
         }
       }
 
-      // Steam Data
+      // Steam - Durum (online/oynuyor): 2 dakikada bir
       if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
         time_t lastSt = 0;
         if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
-          lastSt = lastSteamFetch;
+          lastSt = lastSteamStatusFetch;
           xSemaphoreGive(steamMutex);
         }
-        if (lastSt == 0 || (nowT - lastSt) > STEAM_INTERVAL_SEC) {
-          fetchSteamData();
+        if (lastSt == 0 || (nowT - lastSt) > STEAM_STATUS_INTERVAL_SEC) {
+          fetchSteamStatus();
+        }
+      }
+
+      // Steam - Son oyun/saatler: 30 dakikada bir
+      if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
+        time_t lastSr = 0;
+        if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
+          lastSr = lastSteamFetch;
+          xSemaphoreGive(steamMutex);
+        }
+        if (lastSr == 0 || (nowT - lastSr) > STEAM_RECENT_INTERVAL_SEC) {
+          fetchSteamRecent();
         }
       }
     }
@@ -3311,7 +3338,7 @@ void drawWaterHomeWidget(int x, int y, int w, int h, String &cacheVar, bool forc
   cacheVar = combined;
 
   TFT_eSprite sprSmall = TFT_eSprite(&tft);
-  makeSpriteCard(sprSmall, w, h, goalReached); // accent border if goal reached
+  makeSpriteCard(sprSmall, w, h, true); // her zaman accent cerceve
 
   // Header text
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
@@ -3392,15 +3419,7 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
   if (!force && !playing && combined == cache) return;
   if (!playing) cache = combined;
 
-  // Oyun ismi kisalt (16 karakter)
-  auto shortName = [](const String &s) -> String {
-    if (s.length() <= 16) return s;
-    return s.substring(0, 15) + ".";
-  };
-
-  // Kart: oynarken accent kenari, online'sa normal, offline'sa dim
-  bool accentBorder = playing;
-  makeSpriteCard(sprSmall, w, h, accentBorder);
+  makeSpriteCard(sprSmall, w, h, true); // her zaman accent cerceve
 
   // --- Baslik + durum gostergesi ---
   sprSmall.setTextDatum(TL_DATUM);
@@ -3415,7 +3434,6 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
   // --- Icerik ---
   if (playing) {
     // Oynarken: su an oynanan oyunu kaydirarak goster (Spotify gibi)
-    String dispCur = shortName(localCurrent);
     int scrollW = sprSmall.textWidth(localCurrent, 2);
     int viewW   = w - 20;
 
@@ -3449,7 +3467,8 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
 
   } else {
     // Oynamiyorken: 2 faz arasindan gecis
-    String gameDisp = (localGame.length() == 0) ? "Veri bekleniyor" : shortName(localGame);
+    String gameDisp = localGame.length() == 0 ? String("Veri bekleniyor")
+      : (localGame.length() <= 16 ? localGame : localGame.substring(0, 15) + ".");
 
     sprSmall.setTextColor(COL_DIM, COL_PANEL);
     // Faz etiketi
