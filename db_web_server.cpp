@@ -170,9 +170,6 @@ static void handleRoot() {
   String nickname = prefs.getString("nickname", "");
   bool flashMode = prefs.getBool("flashMode", false);
 
-  String page;
-  page.reserve(21000);
-
   page += "<!doctype html><html><head>";
   page += "<meta charset='utf-8'>";
   page += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
