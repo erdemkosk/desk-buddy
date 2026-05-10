@@ -2865,24 +2865,20 @@ static void paintNotesViewport() {
   const int lh = notesLineHeightPx();
   const int sprW = NOTES_VIEW_W - NOTES_SCROLLBAR_W;
 
-  if (!sprNotesViewportReady) {
-    sprNotes.setColorDepth(16);
-    sprNotes.createSprite(sprW, NOTES_VIEW_H);
-    sprNotesViewportReady = true;
-  }
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(COL_TEXT, COL_PANEL);
 
-  sprNotes.fillSprite(COL_PANEL);
-  sprNotes.setTextDatum(TL_DATUM);
-  sprNotes.setTextColor(COL_TEXT, COL_PANEL);
-
-  const int padX = 2;
+  const int padX = 4;
   for (int i = 0; i < notesWrappedLineCount; i++) {
     int ly = i * lh - notesScrollY;
     if (ly + lh <= 0 || ly >= NOTES_VIEW_H)
       continue;
-    sprNotes.drawString(notesWrappedLines[i], padX, ly, 2);
+    
+    // Clipper (Optional but good): only draw if within viewport Y range
+    if (ly >= 0 && ly + 16 <= NOTES_VIEW_H) {
+       tft.drawString(notesWrappedLines[i], NOTES_VIEW_X + padX, NOTES_VIEW_Y + ly, 2);
+    }
   }
-  sprNotes.pushSprite(NOTES_VIEW_X, NOTES_VIEW_Y);
 
   const int sbX = NOTES_VIEW_X + sprW;
   if (notesTotalContentPx > NOTES_VIEW_H) {
