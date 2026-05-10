@@ -647,6 +647,17 @@ static void handleRoot() {
   page += "<div class='muted'>Sadece kullanıcı adını girin (Örnek: octocat).</div>";
   page += "</div></div>";
 
+  page += "<div class='panel' data-panel='water'>";
+  page += "<button type='button' class='panel-toggle' "
+          "aria-expanded='true'><h2>Su / Alışkanlık Takipçisi</h2><span "
+          "class='panel-chevron'>&#9662;</span></button>";
+  page += "<div class='panel-body'>";
+  page += "<p>Günlük su içme hedefinizi (bardak sayısı) belirleyin. Widget üzerinden dokunarak sayacı artırıp azaltabilirsiniz.</p>";
+  page += "<label class='label'>Günlük Su Hedefi (Bardak)</label>";
+  page += "<input type='number' name='waterGoal' value='" +
+          String(waterGoal) + "' min='1' max='50'>";
+  page += "</div></div>";
+
   page += "<div class='panel' data-panel='tabs'>";
   page += "<button type='button' class='panel-toggle' "
           "aria-expanded='true'><h2>Sekme Tasarımları (Tabs)</h2><span "
@@ -770,6 +781,9 @@ static void handleSave() {
   String newGithubUser =
       server.hasArg("githubUser") ? server.arg("githubUser") : githubUser;
   newGithubUser.trim();
+  int newWaterGoal = server.hasArg("waterGoal") ? server.arg("waterGoal").toInt() : waterGoal;
+  if (newWaterGoal <= 0) newWaterGoal = 8;
+  
   String newTabNames[3];
   PageLayout newLayouts[3];
   HomeWidgetType newWidgetSlots[3][HOME_SLOT_COUNT];
@@ -832,6 +846,7 @@ static void handleSave() {
   calendarUrl = newCalUrl;
   spotifyUrl = newSpotifyUrl;
   githubUser = newGithubUser;
+  waterGoal = newWaterGoal;
   unitKey = newUnits;
   regionFormatKey = newRegion;
   flashModeEnabled = newFlashMode;
@@ -865,6 +880,7 @@ static void handleSave() {
   prefs.putString("calUrl", calendarUrl);
   prefs.putString("spotifyUrl", spotifyUrl);
   prefs.putString("githubUser", githubUser);
+  prefs.putInt("w_goal", waterGoal);
   for (int p = 0; p < 3; p++) {
     prefs.putString(("t_name" + String(p)).c_str(), tabNames[p]);
     prefs.putInt(("t_lay" + String(p)).c_str(), (int)pageLayouts[p]);
