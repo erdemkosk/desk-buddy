@@ -3439,7 +3439,7 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
 
     sprSmall.setTextColor(COL_TEXT, COL_PANEL);
     if (scrollW <= viewW) {
-      sprSmall.drawString(localCurrent, 10, 30, 2);
+      sprSmall.drawString(localCurrent, 10, 28, 2);
     } else {
       static int steamScrollX = 0;
       static unsigned long steamScrollTick = 0;
@@ -3448,21 +3448,21 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
         if (steamScrollX < -(scrollW)) steamScrollX = viewW;
         steamScrollTick = millis();
       }
-      sprSmall.drawString(localCurrent, 10 + steamScrollX, 30, 2);
+      sprSmall.drawString(localCurrent, 10 + steamScrollX, 28, 2);
       // Kenar maskeleri
-      sprSmall.fillRect(0, 25, 9, 22, COL_PANEL);
-      sprSmall.fillRect(w - 9, 25, 9, 22, COL_PANEL);
+      sprSmall.fillRect(0, 23, 9, 22, COL_PANEL);
+      sprSmall.fillRect(w - 9, 23, 9, 22, COL_PANEL);
       sprSmall.drawRoundRect(0, 0, w, h, 10, COL_ACCENT);
     }
 
     // Oynuyor etiketi
     sprSmall.setTextColor(COL_GREEN, COL_PANEL);
-    sprSmall.drawString("Oynuyor", 10, 52, 1);
+    sprSmall.drawString("Oynuyor", 10, 48, 1);
 
     // Bu oyunun toplam suresi
     if (localPtAll >= 0) {
       sprSmall.setTextColor(COL_DIM, COL_PANEL);
-      sprSmall.drawString("Top:" + String(localPtAll / 60) + "sa", 10, 64, 1);
+      sprSmall.drawString("Top:" + String(localPtAll / 60) + "sa", 10, 60, 1);
     }
 
   } else {
@@ -3473,10 +3473,10 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
     sprSmall.setTextColor(COL_DIM, COL_PANEL);
     // Faz etiketi
     String phaseLabel = phase2 ? "Toplam:" : "Son 2 hafta:";
-    sprSmall.drawString(phaseLabel, 10, 28, 1);
+    sprSmall.drawString(phaseLabel, 10, 24, 1);
 
     sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-    sprSmall.drawString(gameDisp, 10, 40, 1);
+    sprSmall.drawString(gameDisp, 10, 36, 1);
 
     // Deger
     sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
@@ -3493,11 +3493,11 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
         hoursLine = (mn == 0) ? String(hr) + " sa"
                               : String(hr) + "sa " + String(mn) + "dk";
       }
-      sprSmall.drawString(hoursLine, 10, 54, 2);
+      sprSmall.drawString(hoursLine, 10, 50, 2);
     } else {
       // Faz 1: toplam sure
       String totalLine = (localPtAll < 0) ? "--" : String(localPtAll / 60) + " sa";
-      sprSmall.drawString(totalLine, 10, 54, 2);
+      sprSmall.drawString(totalLine, 10, 50, 2);
     }
   }
 
