@@ -2018,21 +2018,44 @@ static bool fetchSteamRecent() {
   http.setTimeout(15000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
+  // 5 oyun cekelim ki su an oynanani listede bulabilelim
   String urlRecent = "https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key="
-    + steamApiKey + "&steamid=" + steamId + "&count=1&format=json";
+    + steamApiKey + "&steamid=" + steamId + "&count=5&format=json";
 
   bool got = false;
   if (http.begin(client, urlRecent)) {
     if (http.GET() == 200) {
       String body = http.getString();
-      DynamicJsonDocument doc(1024);
+      DynamicJsonDocument doc(2048); // 5 oyun icin biraz daha yer
       if (!deserializeJson(doc, body)) {
         auto games = doc["response"]["games"];
         if (games.size() > 0) {
+          // Varsayilan olarak en son oynanani al (index 0)
           String gName = games[0]["name"].as<String>();
           int pt2w = games[0]["playtime_2weeks"].as<int>();
           int ptAll = games[0]["playtime_forever"].as<int>();
           cleanTr(gName);
+
+          // Eger su an bir oyun oynuyorsak (steamCurrentGame doluysa),
+          // listede o oyunu bulup onun saatlerini alalim.
+          if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
+            String target = steamCurrentGame;
+            xSemaphoreGive(steamMutex);
+            
+            if (target.length() > 0) {
+              for (int i = 0; i < games.size(); i++) {
+                String gn = games[i]["name"].as<String>();
+                cleanTr(gn);
+                if (gn == target) {
+                  gName = gn;
+                  pt2w = games[i]["playtime_2weeks"].as<int>();
+                  ptAll = games[i]["playtime_forever"].as<int>();
+                  break;
+                }
+              }
+            }
+          }
+
           if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
             steamGameName = gName;
             steamPlaytime2Weeks = pt2w;
@@ -3459,8 +3482,8 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
     sprSmall.setTextColor(COL_GREEN, COL_PANEL);
     sprSmall.drawString("Oynuyor", 10, 48, 1);
 
-    // Bu oyunun toplam suresi
-    if (localPtAll >= 0) {
+    // Bu oyunun toplam suresi (Sadece isimler eslesiyorsa goster ki hata olmasin)
+    if (localPtAll >= 0 && localCurrent == localGame) {
       sprSmall.setTextColor(COL_DIM, COL_PANEL);
       sprSmall.drawString("Top:" + String(localPtAll / 60) + "sa", 10, 60, 1);
     }
@@ -3701,6 +3724,7 @@ void drawGridPageFull(int pageIdx) {
 
   if (pageLayouts[pageIdx] == LAYOUT_GRID) {
     drawClockCardSprite(true);
+    delay(5); // Bellek/Sprite temizliği için çok kısa nefes
   }
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     drawGridSlotWidget(pageIdx, i, true);
@@ -3960,6 +3984,10 @@ void updateStatusDynamic() {
 }
 
 void drawCurrentPageFull() {
+  // Herhangi bir çizimden önce donanımsal scroll'u mutlaka sıfırla
+  hwScrollTo(0);
+  hwSetupScrollArea(0, SCREEN_H, 0);
+
   if (currentPage == PAGE_STATUS) {
     drawStatusPageFull();
   } else {
@@ -4375,12 +4403,6 @@ void hwScrollTo(uint16_t vsp) {
 void animatePageTransition(Page oldP, Page newP) {
   bool slideUp = (newP > oldP);
   int tfa = TOPBAR_H;
-  
-  // If both pages are regular grids, keep the clock stationary!
-  if (oldP < 3 && newP < 3 && pageLayouts[(int)oldP] == LAYOUT_GRID && pageLayouts[(int)newP] == LAYOUT_GRID) {
-    tfa = PAGE_ROW2_Y; // Keep TopBar + Clock fixed
-  }
-
   const int vsa = SCREEN_H - tfa - NAV_H;
   const int bfa = NAV_H;
 
