@@ -143,7 +143,7 @@ String cachePageWidgets[3][HOME_SLOT_COUNT];
 
 bool isWidgetActive(HomeWidgetType type) {
   for (int p = 0; p < 3; p++) {
-    if (pageLayouts[p] == LAYOUT_GRID) {
+    if (pageLayouts[p] == LAYOUT_GRID || pageLayouts[p] == LAYOUT_GRID_6) {
       for (int i = 0; i < HOME_SLOT_COUNT; i++) {
         if (pageWidgetSlots[p][i] == type) {
           return true;
@@ -3604,7 +3604,7 @@ void drawCurrentPageFull() {
     drawStatusPageFull();
   } else {
     int pageIdx = (int)currentPage;
-    if (pageLayouts[pageIdx] == LAYOUT_GRID) {
+    if (pageLayouts[pageIdx] == LAYOUT_GRID || pageLayouts[pageIdx] == LAYOUT_GRID_6) {
       drawGridPageFull(pageIdx);
     } else if (pageLayouts[pageIdx] == LAYOUT_FULL_WEATHER) {
       drawWeatherPageFull();
@@ -3613,7 +3613,7 @@ void drawCurrentPageFull() {
     }
   }
 
-  if (focusMenuOpen && currentPage < 3 && pageLayouts[(int)currentPage] == LAYOUT_GRID)
+  if (focusMenuOpen && currentPage < 3 && (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6))
     drawFocusMenuOverlay(true);
   if (timerDoneDialogOpen)
     drawTimerDoneOverlay(true);
@@ -3632,7 +3632,7 @@ void updateCurrentPageDynamic() {
     return;
   }
 
-  if (focusMenuOpen && currentPage < 3 && pageLayouts[(int)currentPage] == LAYOUT_GRID) {
+  if (focusMenuOpen && currentPage < 3 && (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6)) {
     drawFocusMenuOverlay(false);
     return;
   }
@@ -3641,7 +3641,7 @@ void updateCurrentPageDynamic() {
     updateStatusDynamic();
   } else {
     int pageIdx = (int)currentPage;
-    if (pageLayouts[pageIdx] == LAYOUT_GRID) {
+    if (pageLayouts[pageIdx] == LAYOUT_GRID || pageLayouts[pageIdx] == LAYOUT_GRID_6) {
       updateGridDynamic(pageIdx);
     } else if (pageLayouts[pageIdx] == LAYOUT_FULL_WEATHER) {
       updateWeatherDynamic();
@@ -3734,7 +3734,7 @@ bool handlePageTouch(int x, int y) {
     return handleStatusTouch(x, y);
   } else {
     int pageIdx = (int)currentPage;
-    if (pageLayouts[pageIdx] == LAYOUT_GRID) {
+    if (pageLayouts[pageIdx] == LAYOUT_GRID || pageLayouts[pageIdx] == LAYOUT_GRID_6) {
       return handleGridTouch(pageIdx, x, y);
     }
   }
@@ -4116,7 +4116,7 @@ void loop() {
     dataDirty = false;
   }
 
-  if (currentPage < 3 && pageLayouts[currentPage] == LAYOUT_GRID && !focusMenuOpen && !timerDoneDialogOpen &&
+  if (currentPage < 3 && (pageLayouts[currentPage] == LAYOUT_GRID || pageLayouts[currentPage] == LAYOUT_GRID_6) && !focusMenuOpen && !timerDoneDialogOpen &&
       !wifiForgetConfirmOpen && !sleepOff) {
     static unsigned long lastBuddyAnimMs = 0;
     bool needsAnim = false;
