@@ -236,11 +236,14 @@ SemaphoreHandle_t githubMutex = NULL;
 // Steam
 String steamApiKey = "";
 String steamId = "";
-String steamGameName = "";
-int steamPlaytime2Weeks = -1;  // dakika, -1 = bilinmiyor
-int steamPlaytimeForever = -1; // dakika, toplam
+String steamGameName = "";      // son oynanan oyun (GetRecentlyPlayedGames)
+String steamCurrentGame = "";    // su an oynanan oyun (GetPlayerSummaries)
+bool   steamIsOnline = false;    // Steam'de online mi
+int steamPlaytime2Weeks = -1;    // dakika, -1 = bilinmiyor
+int steamPlaytimeForever = -1;   // dakika, toplam
 time_t lastSteamFetch = 0;
-const uint32_t STEAM_INTERVAL_SEC = 30 * 60; // 30 dk
+const uint32_t STEAM_INTERVAL_SEC = 15 * 60; // 15 dk
+const unsigned long STEAM_ROTATE_MS = 8000UL; // mod ekrani donusu
 SemaphoreHandle_t steamMutex = NULL;
 
 const char *homeWidgetKey(HomeWidgetType type) {
@@ -1972,13 +1975,40 @@ static bool fetchSteamData() {
   http.setTimeout(15000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
-  String url = "https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key="
-    + steamApiKey + "&steamid=" + steamId + "&count=1&format=json";
-
   bool got = false;
-  if (http.begin(client, url)) {
-    int code = http.GET();
-    if (code == 200) {
+
+  // --- 1. Cevrimici durum + su an oynanan oyun ---
+  String urlStatus = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key="
+    + steamApiKey + "&steamids=" + steamId + "&format=json";
+  if (http.begin(client, urlStatus)) {
+    if (http.GET() == 200) {
+      String body = http.getString();
+      DynamicJsonDocument doc(768);
+      if (!deserializeJson(doc, body)) {
+        auto player = doc["response"]["players"][0];
+        bool online = (player["personastate"].as<int>() != 0);
+        String curGame = "";
+        if (player.containsKey("gameextrainfo")) {
+          curGame = player["gameextrainfo"].as<String>();
+          cleanTr(curGame);
+        }
+        if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
+          steamIsOnline = online;
+          steamCurrentGame = curGame;
+          xSemaphoreGive(steamMutex);
+        }
+        got = true;
+        dataDirty = true;
+      }
+    }
+    http.end();
+  }
+
+  // --- 2. Son oynanan oyun + sure ---
+  String urlRecent = "https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key="
+    + steamApiKey + "&steamid=" + steamId + "&count=1&format=json";
+  if (http.begin(client, urlRecent)) {
+    if (http.GET() == 200) {
       String body = http.getString();
       DynamicJsonDocument doc(1024);
       if (!deserializeJson(doc, body)) {
@@ -3333,63 +3363,123 @@ void drawWaterHomeWidget(int x, int y, int w, int h, String &cacheVar, bool forc
 
 void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
                          bool force = false) {
+  // Mutex'ten verileri al
   String localGame = "";
-  int localPt2w = -1;
-  int localPtAll = -1;
+  String localCurrent = "";
+  bool   localOnline = false;
+  int    localPt2w = -1;
+  int    localPtAll = -1;
   if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
-    localGame = steamGameName;
-    localPt2w = steamPlaytime2Weeks;
-    localPtAll = steamPlaytimeForever;
+    localGame    = steamGameName;
+    localCurrent = steamCurrentGame;
+    localOnline  = steamIsOnline;
+    localPt2w    = steamPlaytime2Weeks;
+    localPtAll   = steamPlaytimeForever;
     xSemaphoreGive(steamMutex);
   }
 
-  // Kisa oyun ismi (15 karakter)
-  String dispName = (localGame.length() == 0) ? "Bekleniyor" : localGame;
-  if (dispName.length() > 15) dispName = dispName.substring(0, 14) + ".";
+  bool playing = (localCurrent.length() > 0);
 
-  // Son 2 haftanin suresi: -1 ise henuz veri yok
-  String hoursLine;
-  if (localPt2w < 0) {
-    hoursLine = "--";
-  } else if (localPt2w < 60) {
-    hoursLine = String(localPt2w) + " dk";
-  } else {
-    int hr = localPt2w / 60;
-    int mn = localPt2w % 60;
-    if (mn == 0)
-      hoursLine = String(hr) + " sa";
-    else
-      hoursLine = String(hr) + "sa" + String(mn) + "dk";
-  }
-  String totalLine = (localPtAll < 0) ? "" : "Top:" + String(localPtAll / 60) + "sa";
+  // Rotasyon fazini hesapla (oynamiyorsa 2 faz: 2hafta / toplam)
+  bool phase2 = (!playing) && (((millis() / STEAM_ROTATE_MS) % 2UL) == 1UL);
 
-  String combined = dispName + "|" + hoursLine + "|" + totalLine;
-  if (!force && combined == cache) return;
-  cache = combined;
+  // Cache icin anahtar (rotasyonu cache'e dahil et)
+  String combined = String(playing ? 1 : 0) + "|" + localCurrent
+    + "|" + localGame + "|" + String(localPt2w)
+    + "|" + String(localPtAll) + "|" + String(phase2 ? 1 : 0)
+    + "|" + String(localOnline ? 1 : 0);
+  // Oynarken surekli guncelle (scrolling icin); oynamiyorsa cache ile karsilastir
+  if (!force && !playing && combined == cache) return;
+  if (!playing) cache = combined;
 
-  makeSpriteCard(sprSmall, w, h, false);
+  // Oyun ismi kisalt (16 karakter)
+  auto shortName = [](const String &s) -> String {
+    if (s.length() <= 16) return s;
+    return s.substring(0, 15) + ".";
+  };
 
-  // Baslik
+  // Kart: oynarken accent kenari, online'sa normal, offline'sa dim
+  bool accentBorder = playing;
+  makeSpriteCard(sprSmall, w, h, accentBorder);
+
+  // --- Baslik + durum gostergesi ---
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
   sprSmall.drawString("Steam", 10, 8, 2);
 
-  // Buhar ikonu (kucuk daire)
-  sprSmall.fillCircle(w - 14, 16, 5, 0x34DF); // steam mavisi
-  sprSmall.fillCircle(w - 14, 16, 3, COL_PANEL);
+  // Durum noktasi: yesil=oynuyor, sari=online, kirmizi=offline
+  uint16_t dotCol = playing ? COL_GREEN
+                 : (localOnline ? COL_YELLOW : COL_RED);
+  sprSmall.fillCircle(w - 12, 15, 5, dotCol);
 
-  // Oyun adi
-  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  sprSmall.drawString(dispName, 10, 30, 1);
+  // --- Icerik ---
+  if (playing) {
+    // Oynarken: su an oynanan oyunu kaydirarak goster (Spotify gibi)
+    String dispCur = shortName(localCurrent);
+    int scrollW = sprSmall.textWidth(localCurrent, 2);
+    int viewW   = w - 20;
 
-  // Son 2 hafta suresi (buyuk)
-  sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
-  sprSmall.drawString(hoursLine, 10, 44, 2);
+    sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+    if (scrollW <= viewW) {
+      sprSmall.drawString(localCurrent, 10, 30, 2);
+    } else {
+      static int steamScrollX = 0;
+      static unsigned long steamScrollTick = 0;
+      if (millis() - steamScrollTick > 40) {
+        steamScrollX--;
+        if (steamScrollX < -(scrollW)) steamScrollX = viewW;
+        steamScrollTick = millis();
+      }
+      sprSmall.drawString(localCurrent, 10 + steamScrollX, 30, 2);
+      // Kenar maskeleri
+      sprSmall.fillRect(0, 25, 9, 22, COL_PANEL);
+      sprSmall.fillRect(w - 9, 25, 9, 22, COL_PANEL);
+      sprSmall.drawRoundRect(0, 0, w, h, 10, COL_ACCENT);
+    }
 
-  // Toplam sure (kucuk, dim)
-  if (totalLine.length() > 0) {
+    // Oynuyor etiketi
+    sprSmall.setTextColor(COL_GREEN, COL_PANEL);
+    sprSmall.drawString("Oynuyor", 10, 52, 1);
+
+    // Bu oyunun toplam suresi
+    if (localPtAll >= 0) {
+      sprSmall.setTextColor(COL_DIM, COL_PANEL);
+      sprSmall.drawString("Top:" + String(localPtAll / 60) + "sa", 10, 64, 1);
+    }
+
+  } else {
+    // Oynamiyorken: 2 faz arasindan gecis
+    String gameDisp = (localGame.length() == 0) ? "Veri bekleniyor" : shortName(localGame);
+
     sprSmall.setTextColor(COL_DIM, COL_PANEL);
-    sprSmall.drawString(totalLine, 10, 62, 1);
+    // Faz etiketi
+    String phaseLabel = phase2 ? "Toplam:" : "Son 2 hafta:";
+    sprSmall.drawString(phaseLabel, 10, 28, 1);
+
+    sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+    sprSmall.drawString(gameDisp, 10, 40, 1);
+
+    // Deger
+    sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
+    if (!phase2) {
+      // Faz 0: son 2 hafta suresi
+      String hoursLine;
+      if (localPt2w < 0) {
+        hoursLine = "--";
+      } else if (localPt2w < 60) {
+        hoursLine = String(localPt2w) + " dk";
+      } else {
+        int hr = localPt2w / 60;
+        int mn = localPt2w % 60;
+        hoursLine = (mn == 0) ? String(hr) + " sa"
+                              : String(hr) + "sa " + String(mn) + "dk";
+      }
+      sprSmall.drawString(hoursLine, 10, 54, 2);
+    } else {
+      // Faz 1: toplam sure
+      String totalLine = (localPtAll < 0) ? "--" : String(localPtAll / 60) + " sa";
+      sprSmall.drawString(totalLine, 10, 54, 2);
+    }
   }
 
   pushSpriteAndDelete(sprSmall, x, y);
