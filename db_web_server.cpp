@@ -662,15 +662,16 @@ static void handleRoot() {
 
     page += "<div style='margin-bottom: 10px;'>";
     page += "<label class='label'>Sayfa Tipi (Layout)</label>";
-    page += "<select name='t_lay" + String(p) + "' onchange='document.getElementById(\"grid_p" + String(p) + "\").style.display=(this.value==\"0\")?\"grid\":\"none\"'>";
-    page += "<option value='0'" + String(pageLayouts[p] == LAYOUT_GRID ? " selected" : "") + ">Izgara (4 Widget)</option>";
+    page += "<select name='t_lay" + String(p) + "' onchange='updateLayout(this.value, " + String(p) + ")'>";
+    page += "<option value='0'" + String(pageLayouts[p] == LAYOUT_GRID ? " selected" : "") + ">Izgara (Saat + 4 Widget)</option>";
+    page += "<option value='3'" + String(pageLayouts[p] == LAYOUT_GRID_6 ? " selected" : "") + ">Izgara (Saat Yok + 6 Widget)</option>";
     page += "<option value='1'" + String(pageLayouts[p] == LAYOUT_FULL_WEATHER ? " selected" : "") + ">Tam Ekran: Hava Durumu</option>";
     page += "<option value='2'" + String(pageLayouts[p] == LAYOUT_FULL_NOTES ? " selected" : "") + ">Tam Ekran: Notlar</option>";
     page += "</select></div>";
 
-    page += "<div id='grid_p" + String(p) + "' class='grid' style='display:" + String(pageLayouts[p] == LAYOUT_GRID ? "grid" : "none") + "; padding-top: 10px;'>";
+    page += "<div id='grid_p" + String(p) + "' class='grid' style='display:" + String((pageLayouts[p] == LAYOUT_GRID || pageLayouts[p] == LAYOUT_GRID_6) ? "grid" : "none") + "; padding-top: 10px;'>";
     for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-      page += "<div><label class='label'>";
+      page += "<div id='p" + String(p) + "slot" + String(i) + "_c' style='display:" + String((pageLayouts[p] == LAYOUT_GRID && i >= 4) ? "none" : "block") + "'><label class='label'>";
       page += homeSlotLabel(i);
       page += "</label><select name='t" + String(p) + "slot" + String(i) + "'>";
       appendHomeWidgetOptions(page, homeWidgetKey(pageWidgetSlots[p][i]));
@@ -684,7 +685,14 @@ static void handleRoot() {
 
   page += "<button type='submit'>Save to Deskbuddy</button>";
   page += "</div></div></form>";
-  page += "<script>";
+  page += "<script>function updateLayout(val, p){"
+          "var g=document.getElementById('grid_p'+p);"
+          "var isGrid=(val==='0'||val==='3');"
+          "g.style.display=isGrid?'grid':'none';"
+          "if(isGrid){"
+          "document.getElementById('p'+p+'slot4_c').style.display=(val==='3')?'block':'none';"
+          "document.getElementById('p'+p+'slot5_c').style.display=(val==='3')?'block':'none';"
+          "}}\n";
   page +=
       "var "
       "colorNames={accent:{standard:'Standard',ice:'Ice',white:'White',cyan:'"

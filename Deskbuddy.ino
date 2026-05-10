@@ -325,27 +325,30 @@ HomeWidgetType homeWidgetFromKey(const String &key) {
 
 const char *homeSlotLabel(int slot) {
   switch (slot) {
-  case 0:
-    return "Ust sol";
-  case 1:
-    return "Ust sag";
-  case 2:
-    return "Alt sol";
-  case 3:
-    return "Alt sag";
-  default:
-    return "Yuva";
+  case 0: return "1. Satir Sol";
+  case 1: return "1. Satir Sag";
+  case 2: return "2. Satir Sol";
+  case 3: return "2. Satir Sag";
+  case 4: return "3. Satir Sol";
+  case 5: return "3. Satir Sag";
+  default: return "Yuva";
   }
 }
 
-void getHomeSlotRect(int slot, int &x, int &y, int &w, int &h) {
-  const int xs[HOME_SLOT_COUNT] = {8, 124, 8, 124};
-  const int ys[HOME_SLOT_COUNT] = {HOME_GRID_Y1, HOME_GRID_Y1, HOME_GRID_Y2,
-                                   HOME_GRID_Y2};
-  x = xs[slot];
-  y = ys[slot];
+void getHomeSlotRect(int pageIdx, int slot, int &x, int &y, int &w, int &h) {
+  x = (slot % 2 == 0) ? 8 : 124;
   w = 108;
   h = HOME_WIDGET_H;
+
+  if (pageLayouts[pageIdx] == LAYOUT_GRID_6) {
+    if (slot < 2) y = PAGE_ROW1_Y;
+    else if (slot < 4) y = PAGE_ROW2_Y;
+    else y = PAGE_ROW3_Y;
+  } else {
+    if (slot < 2) y = PAGE_ROW2_Y;
+    else if (slot < 4) y = PAGE_ROW3_Y;
+    else y = -100;
+  }
 }
 
 void appendHomeWidgetOptions(String &page, const String &selectedKey) {
@@ -3148,8 +3151,10 @@ void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
 }
 
 void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
+  if (pageLayouts[pageIdx] == LAYOUT_GRID && slot >= 4) return;
+
   int x, y, w, h;
-  getHomeSlotRect(slot, x, y, w, h);
+  getHomeSlotRect(pageIdx, slot, x, y, w, h);
 
   switch (pageWidgetSlots[pageIdx][slot]) {
   case HOME_WIDGET_HUMIDITY:
@@ -3334,7 +3339,9 @@ void drawGridPageFull(int pageIdx) {
   pageDirty = false;
   lastDrawnPage = currentPage;
 
-  drawClockCardSprite(true);
+  if (pageLayouts[pageIdx] == LAYOUT_GRID) {
+    drawClockCardSprite(true);
+  }
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     drawGridSlotWidget(pageIdx, i, true);
   }
@@ -3355,7 +3362,9 @@ void updateGridDynamic(int pageIdx) {
     return;
   }
 
-  drawClockCardSprite(false);
+  if (pageLayouts[pageIdx] == LAYOUT_GRID) {
+    drawClockCardSprite(false);
+  }
   for (int i = 0; i < HOME_SLOT_COUNT; i++) {
     drawGridSlotWidget(pageIdx, i, false);
   }
@@ -3701,7 +3710,7 @@ bool handleGridTouch(int pageIdx, int x, int y) {
       continue;
 
     int slotX, slotY, slotW, slotH;
-    getHomeSlotRect(slot, slotX, slotY, slotW, slotH);
+    getHomeSlotRect(pageIdx, slot, slotX, slotY, slotW, slotH);
 
     if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
       if (focusTimerFinished) {
@@ -3991,8 +4000,14 @@ void hwScrollTo(uint16_t vsp) {
 
 void animatePageTransition(Page oldP, Page newP) {
   bool slideUp = (newP > oldP);
-  const int tfa = TOPBAR_H;
-  const int vsa = SCREEN_H - TOPBAR_H - NAV_H;
+  int tfa = TOPBAR_H;
+  
+  // If both pages are regular grids, keep the clock stationary!
+  if (oldP < 3 && newP < 3 && pageLayouts[(int)oldP] == LAYOUT_GRID && pageLayouts[(int)newP] == LAYOUT_GRID) {
+    tfa = 150; // TOPBAR_H + 108 (clock) + 8
+  }
+
+  const int vsa = SCREEN_H - tfa - NAV_H;
   const int bfa = NAV_H;
 
   hwSetupScrollArea(tfa, vsa, bfa);
