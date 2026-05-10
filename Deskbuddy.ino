@@ -233,6 +233,16 @@ int githubTotalLastYear = 0;
 time_t lastGithubFetch = 0;
 SemaphoreHandle_t githubMutex = NULL;
 
+// Steam
+String steamApiKey = "";
+String steamId = "";
+String steamGameName = "";
+int steamPlaytime2Weeks = -1;  // dakika, -1 = bilinmiyor
+int steamPlaytimeForever = -1; // dakika, toplam
+time_t lastSteamFetch = 0;
+const uint32_t STEAM_INTERVAL_SEC = 30 * 60; // 30 dk
+SemaphoreHandle_t steamMutex = NULL;
+
 const char *homeWidgetKey(HomeWidgetType type) {
   switch (type) {
   case HOME_WIDGET_HUMIDITY:
@@ -265,6 +275,8 @@ const char *homeWidgetKey(HomeWidgetType type) {
     return "github";
   case HOME_WIDGET_WATER:
     return "water";
+  case HOME_WIDGET_STEAM:
+    return "steam";
   default:
     return "humidity";
   }
@@ -302,6 +314,8 @@ const char *homeWidgetLabel(HomeWidgetType type) {
     return "GitHub";
   case HOME_WIDGET_WATER:
     return "Su";
+  case HOME_WIDGET_STEAM:
+    return "Steam";
   default:
     return "Nem";
   }
@@ -338,6 +352,8 @@ HomeWidgetType homeWidgetFromKey(const String &key) {
     return HOME_WIDGET_GITHUB;
   if (key == "water")
     return HOME_WIDGET_WATER;
+  if (key == "steam")
+    return HOME_WIDGET_STEAM;
   return HOME_WIDGET_HUMIDITY;
 }
 
@@ -375,7 +391,8 @@ void appendHomeWidgetOptions(String &page, const String &selectedKey) {
       HOME_WIDGET_OUTDOOR,  HOME_WIDGET_KP,    HOME_WIDGET_UV,
       HOME_WIDGET_WIND,     HOME_WIDGET_SUN,   HOME_WIDGET_FINANCE,
       HOME_WIDGET_BUDDY,    HOME_WIDGET_NOTES, HOME_WIDGET_CALENDAR,
-      HOME_WIDGET_SPOTIFY,  HOME_WIDGET_GITHUB, HOME_WIDGET_WATER};
+      HOME_WIDGET_SPOTIFY,  HOME_WIDGET_GITHUB, HOME_WIDGET_WATER,
+      HOME_WIDGET_STEAM};
 
   for (HomeWidgetType type : types) {
     const char *key = homeWidgetKey(type);
@@ -1284,6 +1301,8 @@ void loadStoredSettings() {
   calendarUrl = prefs.getString("calUrl", "");
   spotifyUrl = prefs.getString("spotifyUrl", "");
   githubUser = prefs.getString("githubUser", "");
+  steamApiKey = prefs.getString("steamKey", "");
+  steamId = prefs.getString("steamId", "");
 
   waterCount = prefs.getInt("w_cnt", 0);
   waterGoal = prefs.getInt("w_goal", 8);
@@ -1943,6 +1962,49 @@ static bool fetchGithubData() {
 }
 
 
+static bool fetchSteamData() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  if (steamApiKey.length() < 10 || steamId.length() < 5) return false;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(15000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+  String url = "https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key="
+    + steamApiKey + "&steamid=" + steamId + "&count=1&format=json";
+
+  bool got = false;
+  if (http.begin(client, url)) {
+    int code = http.GET();
+    if (code == 200) {
+      String body = http.getString();
+      DynamicJsonDocument doc(1024);
+      if (!deserializeJson(doc, body)) {
+        auto games = doc["response"]["games"];
+        if (games.size() > 0) {
+          String gName = games[0]["name"].as<String>();
+          int pt2w = games[0]["playtime_2weeks"].as<int>();
+          int ptAll = games[0]["playtime_forever"].as<int>();
+          cleanTr(gName);
+          if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
+            steamGameName = gName;
+            steamPlaytime2Weeks = pt2w;
+            steamPlaytimeForever = ptAll;
+            lastSteamFetch = time(nullptr);
+            xSemaphoreGive(steamMutex);
+          }
+          got = true;
+          dataDirty = true;
+        }
+      }
+    }
+    http.end();
+  }
+  return got;
+}
+
 void networkFetchTask(void *pvParameters) {
   while (true) {
     if (WiFi.status() == WL_CONNECTED) {
@@ -1982,6 +2044,18 @@ void networkFetchTask(void *pvParameters) {
         // Fetch every 1 hour (3600 sec)
         if (lastG == 0 || (nowT - lastG) > 3600) {
           fetchGithubData();
+        }
+      }
+
+      // Steam Data
+      if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
+        time_t lastSt = 0;
+        if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
+          lastSt = lastSteamFetch;
+          xSemaphoreGive(steamMutex);
+        }
+        if (lastSt == 0 || (nowT - lastSt) > STEAM_INTERVAL_SEC) {
+          fetchSteamData();
         }
       }
     }
@@ -3257,6 +3331,70 @@ void drawWaterHomeWidget(int x, int y, int w, int h, String &cacheVar, bool forc
   pushSpriteAndDelete(sprSmall, x, y);
 }
 
+void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
+                         bool force = false) {
+  String localGame = "";
+  int localPt2w = -1;
+  int localPtAll = -1;
+  if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
+    localGame = steamGameName;
+    localPt2w = steamPlaytime2Weeks;
+    localPtAll = steamPlaytimeForever;
+    xSemaphoreGive(steamMutex);
+  }
+
+  // Kisa oyun ismi (15 karakter)
+  String dispName = (localGame.length() == 0) ? "Bekleniyor" : localGame;
+  if (dispName.length() > 15) dispName = dispName.substring(0, 14) + ".";
+
+  // Son 2 haftanin suresi: -1 ise henuz veri yok
+  String hoursLine;
+  if (localPt2w < 0) {
+    hoursLine = "--";
+  } else if (localPt2w < 60) {
+    hoursLine = String(localPt2w) + " dk";
+  } else {
+    int hr = localPt2w / 60;
+    int mn = localPt2w % 60;
+    if (mn == 0)
+      hoursLine = String(hr) + " sa";
+    else
+      hoursLine = String(hr) + "sa" + String(mn) + "dk";
+  }
+  String totalLine = (localPtAll < 0) ? "" : "Top:" + String(localPtAll / 60) + "sa";
+
+  String combined = dispName + "|" + hoursLine + "|" + totalLine;
+  if (!force && combined == cache) return;
+  cache = combined;
+
+  makeSpriteCard(sprSmall, w, h, false);
+
+  // Baslik
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("Steam", 10, 8, 2);
+
+  // Buhar ikonu (kucuk daire)
+  sprSmall.fillCircle(w - 14, 16, 5, 0x34DF); // steam mavisi
+  sprSmall.fillCircle(w - 14, 16, 3, COL_PANEL);
+
+  // Oyun adi
+  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  sprSmall.drawString(dispName, 10, 30, 1);
+
+  // Son 2 hafta suresi (buyuk)
+  sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
+  sprSmall.drawString(hoursLine, 10, 44, 2);
+
+  // Toplam sure (kucuk, dim)
+  if (totalLine.length() > 0) {
+    sprSmall.setTextColor(COL_DIM, COL_PANEL);
+    sprSmall.drawString(totalLine, 10, 62, 1);
+  }
+
+  pushSpriteAndDelete(sprSmall, x, y);
+}
+
 void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
   if (pageLayouts[pageIdx] == LAYOUT_GRID && slot >= 4) return;
 
@@ -3317,6 +3455,9 @@ void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
     break;
   case HOME_WIDGET_WATER:
     drawWaterHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
+    break;
+  case HOME_WIDGET_STEAM:
+    drawSteamHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   }
 }
@@ -3818,6 +3959,7 @@ bool handleGridTouch(int pageIdx, int x, int y) {
   for (int slot = 0; slot < HOME_SLOT_COUNT; slot++) {
     int slotX, slotY, slotW, slotH;
     getHomeSlotRect(pageIdx, slot, slotX, slotY, slotW, slotH);
+    if (slotY < 0) continue; // Skip invalid slots (unused slots in 4-widget layout)
 
     if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_TIMER) {
       if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
@@ -4046,7 +4188,8 @@ void setup() {
   spotifyMutex = xSemaphoreCreateMutex();
   calendarMutex = xSemaphoreCreateMutex();
   githubMutex = xSemaphoreCreateMutex();
-  if (spotifyMutex || calendarMutex || githubMutex) {
+  steamMutex = xSemaphoreCreateMutex();
+  if (spotifyMutex || calendarMutex || githubMutex || steamMutex) {
     xTaskCreatePinnedToCore(networkFetchTask, "NetworkTask", 10240, NULL, 1,
                             NULL, 0);
   }

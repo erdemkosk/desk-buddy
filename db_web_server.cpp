@@ -52,6 +52,10 @@ extern time_t lastSpotifyFetch;
 extern String githubUser;
 extern time_t lastGithubFetch;
 
+extern String steamApiKey;
+extern String steamId;
+extern time_t lastSteamFetch;
+
 extern int waterGoal;
 
 extern bool notesDirty;
@@ -660,6 +664,24 @@ static void handleRoot() {
           String(waterGoal) + "' min='1' max='50'>";
   page += "</div></div>";
 
+  page += "<div class='panel' data-panel='steam'>";
+  page += "<button type='button' class='panel-toggle' "
+          "aria-expanded='true'><h2>Steam</h2><span "
+          "class='panel-chevron'>&#9662;</span></button>";
+  page += "<div class='panel-body'>";
+  page += "<p>Son oynanan oyunu ve haftalik sure gostermek icin Steam API Key ve Steam ID girin.</p>";
+  page += "<div class='grid'>";
+  page += "<div><label class='label'>Steam API Key</label>";
+  page += "<input type='text' name='steamKey' value='" + htmlEscape(steamApiKey) + "' placeholder='XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'></div>";
+  page += "<div><label class='label'>Steam ID (64-bit)</label>";
+  page += "<input type='text' name='steamId' value='" + htmlEscape(steamId) + "' placeholder='76561198XXXXXXXXX'></div>";
+  page += "</div>";
+  page += "<div class='muted' style='margin-top:10px;'>";
+  page += "API Key icin: <a href='https://steamcommunity.com/dev/apikey' target='_blank' style='color:#38bdf8;'>steamcommunity.com/dev/apikey</a> &nbsp;|&nbsp; ";
+  page += "Steam ID icin: <a href='https://steamid.io' target='_blank' style='color:#38bdf8;'>steamid.io</a></div>";
+  page += "<div class='muted' style='margin-top:6px;'>Steam profilinizin herkese acik olmasi gerekiyor. Son 2 hafta icinde oynadiginiz oyun gosterilir.</div>";
+  page += "</div></div>";
+
   page += "<div class='panel' data-panel='tabs'>";
   page += "<button type='button' class='panel-toggle' "
           "aria-expanded='true'><h2>Sekme Tasarımları (Tabs)</h2><span "
@@ -785,6 +807,12 @@ static void handleSave() {
   newGithubUser.trim();
   int newWaterGoal = server.hasArg("waterGoal") ? server.arg("waterGoal").toInt() : waterGoal;
   if (newWaterGoal <= 0) newWaterGoal = 8;
+  String newSteamKey =
+      server.hasArg("steamKey") ? server.arg("steamKey") : steamApiKey;
+  newSteamKey.trim();
+  String newSteamId =
+      server.hasArg("steamId") ? server.arg("steamId") : steamId;
+  newSteamId.trim();
   
   String newTabNames[3];
   PageLayout newLayouts[3];
@@ -849,6 +877,8 @@ static void handleSave() {
   spotifyUrl = newSpotifyUrl;
   githubUser = newGithubUser;
   waterGoal = newWaterGoal;
+  steamApiKey = newSteamKey;
+  steamId = newSteamId;
   unitKey = newUnits;
   regionFormatKey = newRegion;
   flashModeEnabled = newFlashMode;
@@ -883,6 +913,8 @@ static void handleSave() {
   prefs.putString("spotifyUrl", spotifyUrl);
   prefs.putString("githubUser", githubUser);
   prefs.putInt("w_goal", waterGoal);
+  prefs.putString("steamKey", steamApiKey);
+  prefs.putString("steamId", steamId);
   for (int p = 0; p < 3; p++) {
     prefs.putString(("t_name" + String(p)).c_str(), tabNames[p]);
     prefs.putInt(("t_lay" + String(p)).c_str(), (int)pageLayouts[p]);
@@ -903,6 +935,7 @@ static void handleSave() {
   lastCalendarFetch = 0;
   lastSpotifyFetch = 0;
   lastGithubFetch = 0;
+  lastSteamFetch = 0;
 
   notesDirty = true;
   pageDirty = true;
