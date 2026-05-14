@@ -1452,11 +1452,22 @@ bool fetchSunriseSunset() {
                String(LAT, 4) + "&lng=" + String(LNG, 4) + "&formatted=0";
 
   HTTPClient http;
-  if (!http.begin(client, url))
+  http.setTimeout(8000);
+  if (!http.begin(client, url)) {
+    Serial.println("[Sunrise] http.begin failed");
     return false;
+  }
 
   int code = http.GET();
   if (code != 200) {
+    Serial.printf("[Sunrise] GET failed, code: %d\n", code);
+    http.end();
+    return false;
+  }
+
+  int len = http.getSize();
+  if (len > 5000) {
+    Serial.printf("[Sunrise] Body too large: %d\n", len);
     http.end();
     return false;
   }
@@ -1464,14 +1475,29 @@ bool fetchSunriseSunset() {
   String body = http.getString();
   http.end();
 
-  StaticJsonDocument<1024> doc;
-  if (deserializeJson(doc, body))
+  if (body.length() < 10) {
+    Serial.println("[Sunrise] Empty body");
     return false;
+  }
+
+  StaticJsonDocument<1024> doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    Serial.printf("[Sunrise] JSON err: %s\n", err.c_str());
+    return false;
+  }
+
+  if (!doc.containsKey("results")) {
+    Serial.println("[Sunrise] No results key");
+    return false;
+  }
 
   const char *sunriseStr = doc["results"]["sunrise"];
   const char *sunsetStr = doc["results"]["sunset"];
-  if (!sunriseStr || !sunsetStr)
+  if (!sunriseStr || !sunsetStr) {
+    Serial.println("[Sunrise] Missing sunrise/sunset fields");
     return false;
+  }
 
   auto parseIsoToEpochUTC = [](const char *iso) -> time_t {
     int Y, M, D, h, m, s;
@@ -1504,8 +1530,10 @@ bool fetchSunriseSunset() {
 
   time_t srEpoch = parseIsoToEpochUTC(sunriseStr);
   time_t ssEpoch = parseIsoToEpochUTC(sunsetStr);
-  if (srEpoch < 0 || ssEpoch < 0)
+  if (srEpoch < 0 || ssEpoch < 0) {
+    Serial.println("[Sunrise] Parse epoch failed");
     return false;
+  }
 
   sunriseMin = minutesFromLocalEpoch(srEpoch);
   sunsetMin = minutesFromLocalEpoch(ssEpoch);
@@ -1541,11 +1569,22 @@ bool fetchWeather() {
                "&forecast_days=1&timezone=auto&wind_speed_unit=ms";
 
   HTTPClient http;
-  if (!http.begin(client, url))
+  http.setTimeout(8000);
+  if (!http.begin(client, url)) {
+    Serial.println("[Weather] http.begin failed");
     return false;
+  }
 
   int code = http.GET();
   if (code != 200) {
+    Serial.printf("[Weather] GET failed, code: %d\n", code);
+    http.end();
+    return false;
+  }
+
+  int len = http.getSize();
+  if (len > 10000) {
+    Serial.printf("[Weather] Body too large: %d\n", len);
     http.end();
     return false;
   }
@@ -1553,9 +1592,17 @@ bool fetchWeather() {
   String body = http.getString();
   http.end();
 
-  StaticJsonDocument<4096> doc;
-  if (deserializeJson(doc, body))
+  if (body.length() < 10) {
+    Serial.println("[Weather] Empty body");
     return false;
+  }
+
+  StaticJsonDocument<4096> doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    Serial.printf("[Weather] JSON err: %s\n", err.c_str());
+    return false;
+  }
 
   tempC = doc["current"]["temperature_2m"] | NAN;
   humidityPct = doc["current"]["relative_humidity_2m"] | NAN;
@@ -1569,35 +1616,39 @@ bool fetchWeather() {
   tempMaxC = NAN;
   tempMinC = NAN;
 
-  JsonArray maxTemps = doc["daily"]["temperature_2m_max"];
-  JsonArray minTemps = doc["daily"]["temperature_2m_min"];
-  if (maxTemps && !maxTemps.isNull() && maxTemps.size() > 0)
-    tempMaxC = maxTemps[0] | NAN;
-  if (minTemps && !minTemps.isNull() && minTemps.size() > 0)
-    tempMinC = minTemps[0] | NAN;
+  if (doc.containsKey("daily")) {
+    JsonArray maxTemps = doc["daily"]["temperature_2m_max"];
+    JsonArray minTemps = doc["daily"]["temperature_2m_min"];
+    if (maxTemps && !maxTemps.isNull() && maxTemps.size() > 0)
+      tempMaxC = maxTemps[0] | NAN;
+    if (minTemps && !minTemps.isNull() && minTemps.size() > 0)
+      tempMinC = minTemps[0] | NAN;
+  }
 
-  JsonArray times = doc["hourly"]["time"];
-  JsonArray precs = doc["hourly"]["precipitation"];
+  if (doc.containsKey("hourly")) {
+    JsonArray times = doc["hourly"]["time"];
+    JsonArray precs = doc["hourly"]["precipitation"];
 
-  if (times && precs) {
-    time_t nowT = time(nullptr);
-    struct tm tmNow;
-    localtime_r(&nowT, &tmNow);
+    if (times && precs && times.size() > 0 && precs.size() > 0) {
+      time_t nowT = time(nullptr);
+      struct tm tmNow;
+      localtime_r(&nowT, &tmNow);
 
-    char key[20];
-    strftime(key, sizeof(key), "%Y-%m-%dT%H:00", &tmNow);
+      char key[20];
+      strftime(key, sizeof(key), "%Y-%m-%dT%H:00", &tmNow);
 
-    int idx = -1;
-    for (int i = 0; i < (int)times.size(); i++) {
-      const char *t = times[i];
-      if (t && String(t).startsWith(key)) {
-        idx = i;
-        break;
+      int idx = -1;
+      for (int i = 0; i < (int)times.size(); i++) {
+        const char *t = times[i];
+        if (t && String(t).startsWith(key)) {
+          idx = i;
+          break;
+        }
       }
+      if (idx < 0)
+        idx = 0;
+      precipMm = precs[idx] | NAN;
     }
-    if (idx < 0)
-      idx = 0;
-    precipMm = precs[idx] | NAN;
   }
 
   lastWeatherFetch = time(nullptr);
@@ -1625,13 +1676,23 @@ bool fetchKpIndex() {
   client.setInsecure();
 
   HTTPClient http;
+  http.setTimeout(8000);
   if (!http.begin(client, "https://services.swpc.noaa.gov/products/"
                           "noaa-planetary-k-index.json")) {
+    Serial.println("[Kp] http.begin failed");
     return false;
   }
 
   int code = http.GET();
   if (code != 200) {
+    Serial.printf("[Kp] GET failed, code: %d\n", code);
+    http.end();
+    return false;
+  }
+
+  int len = http.getSize();
+  if (len > 10000) {
+    Serial.printf("[Kp] Body too large: %d\n", len);
     http.end();
     return false;
   }
@@ -1639,20 +1700,33 @@ bool fetchKpIndex() {
   String body = http.getString();
   http.end();
 
-  int lastRow = body.lastIndexOf('[');
-  if (lastRow < 0)
+  if (body.length() < 10) {
+    Serial.println("[Kp] Empty body");
     return false;
+  }
+
+  int lastRow = body.lastIndexOf('[');
+  if (lastRow < 0) {
+    Serial.println("[Kp] Parsing failed: no '['");
+    return false;
+  }
 
   int firstComma = body.indexOf(',', lastRow);
-  if (firstComma < 0)
+  if (firstComma < 0) {
+    Serial.println("[Kp] Parsing failed: no comma");
     return false;
+  }
 
   int q1 = body.indexOf('"', firstComma);
-  if (q1 < 0)
+  if (q1 < 0) {
+    Serial.println("[Kp] Parsing failed: no q1");
     return false;
+  }
   int q2 = body.indexOf('"', q1 + 1);
-  if (q2 < 0)
+  if (q2 < 0) {
+    Serial.println("[Kp] Parsing failed: no q2");
     return false;
+  }
 
   String kpStrLocal = body.substring(q1 + 1, q2);
   kpIndex = kpStrLocal.toFloat();
@@ -1678,15 +1752,16 @@ static bool fetchFinanceTruncgil() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(20000);
+  http.setTimeout(10000);
   const char *ua = "Mozilla/5.0 (compatible; Deskbuddy/1.0)";
 
   bool got = false;
 
-  if (http.begin(client,
-                 "https://finance.truncgil.com/api/currency-rates/USD")) {
+  // USD
+  if (http.begin(client, "https://finance.truncgil.com/api/currency-rates/USD")) {
     http.addHeader("User-Agent", ua);
-    if (http.GET() == 200) {
+    int code = http.GET();
+    if (code == 200) {
       String body = http.getString();
       DynamicJsonDocument doc(512);
       if (!deserializeJson(doc, body)) {
@@ -1701,30 +1776,41 @@ static bool fetchFinanceTruncgil() {
           }
         }
       }
+    } else {
+      Serial.printf("[Finance] USD failed, code: %d\n", code);
     }
     http.end();
   }
 
+  // GOLD
   if (http.begin(client, "https://finance.truncgil.com/api/gold-rates")) {
     http.addHeader("User-Agent", ua);
-    if (http.GET() == 200) {
-      String body = http.getString();
-      DynamicJsonDocument doc(8192);
-      if (!deserializeJson(doc, body)) {
-        JsonObject rates = doc["Rates"];
-        if (!rates.isNull()) {
-          JsonObject gra = rates["GRA"];
-          if (!gra.isNull()) {
-            if (gra.containsKey("Selling")) {
-              financeGoldTryGram = gra["Selling"].as<float>();
-              got = true;
-            } else if (gra.containsKey("Buying")) {
-              financeGoldTryGram = gra["Buying"].as<float>();
-              got = true;
+    int code = http.GET();
+    if (code == 200) {
+      int len = http.getSize();
+      if (len > 15000) {
+        Serial.printf("[Finance] Gold body too large: %d\n", len);
+      } else {
+        String body = http.getString();
+        DynamicJsonDocument doc(8192);
+        if (!deserializeJson(doc, body)) {
+          JsonObject rates = doc["Rates"];
+          if (!rates.isNull()) {
+            JsonObject gra = rates["GRA"];
+            if (!gra.isNull()) {
+              if (gra.containsKey("Selling")) {
+                financeGoldTryGram = gra["Selling"].as<float>();
+                got = true;
+              } else if (gra.containsKey("Buying")) {
+                financeGoldTryGram = gra["Buying"].as<float>();
+                got = true;
+              }
             }
           }
         }
       }
+    } else {
+      Serial.printf("[Finance] Gold failed, code: %d\n", code);
     }
     http.end();
   }
@@ -1757,33 +1843,48 @@ static bool fetchCalendarData() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(15000);
+  http.setTimeout(12000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   bool got = false;
   if (http.begin(client, calendarUrl)) {
-    if (http.GET() == 200) {
-      String body = http.getString();
-      DynamicJsonDocument doc(512);
-      if (!deserializeJson(doc, body)) {
-        if (doc.containsKey("title") && doc.containsKey("time")) {
-          String cTitle = doc["title"].as<String>();
-          String cTime = doc["time"].as<String>();
-          if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
-            nextEventTitle = cTitle;
-            nextEventTime = cTime;
-            xSemaphoreGive(calendarMutex);
+    int code = http.GET();
+    if (code == 200) {
+      int len = http.getSize();
+      if (len > 5000) {
+        Serial.printf("[Calendar] Body too large: %d\n", len);
+      } else {
+        String body = http.getString();
+        DynamicJsonDocument doc(512);
+        DeserializationError err = deserializeJson(doc, body);
+        if (!err) {
+          if (doc.containsKey("title") && doc.containsKey("time")) {
+            String cTitle = doc["title"].as<String>();
+            String cTime = doc["time"].as<String>();
+            if (calendarMutex && xSemaphoreTake(calendarMutex, pdMS_TO_TICKS(1000))) {
+              nextEventTitle = cTitle;
+              nextEventTime = cTime;
+              xSemaphoreGive(calendarMutex);
+              got = true;
+              dataDirty = true;
+            } else {
+              Serial.println("[Calendar] Mutex timeout");
+            }
           }
-          got = true;
-          dataDirty = true;
+        } else {
+          Serial.printf("[Calendar] JSON err: %s\n", err.c_str());
         }
       }
+    } else {
+      Serial.printf("[Calendar] GET failed, code: %d\n", code);
     }
     http.end();
+  } else {
+    Serial.println("[Calendar] http.begin failed");
   }
 
   if (got || calendarUrl.length() >= 10) {
-    if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
+    if (calendarMutex && xSemaphoreTake(calendarMutex, pdMS_TO_TICKS(1000))) {
       lastCalendarFetch = time(nullptr);
       lastSyncTime = lastCalendarFetch;
       xSemaphoreGive(calendarMutex);
@@ -1814,39 +1915,54 @@ static bool fetchSpotifyData() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(15000);
+  http.setTimeout(12000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   bool got = false;
   if (http.begin(client, spotifyUrl)) {
-    if (http.GET() == 200) {
-      String body = http.getString();
-      DynamicJsonDocument doc(512);
-      if (!deserializeJson(doc, body)) {
-        if (doc.containsKey("song")) {
-          String sSong = doc["song"].as<String>();
-          String sArtist = doc["artist"].as<String>();
-          cleanTr(sSong);
-          cleanTr(sArtist);
-          bool sPlaying = doc["playing"].as<bool>();
+    int code = http.GET();
+    if (code == 200) {
+      int len = http.getSize();
+      if (len > 5000) {
+        Serial.printf("[Spotify] Body too large: %d\n", len);
+      } else {
+        String body = http.getString();
+        DynamicJsonDocument doc(512);
+        DeserializationError err = deserializeJson(doc, body);
+        if (!err) {
+          if (doc.containsKey("song")) {
+            String sSong = doc["song"].as<String>();
+            String sArtist = doc["artist"].as<String>();
+            cleanTr(sSong);
+            cleanTr(sArtist);
+            bool sPlaying = doc["playing"].as<bool>();
 
-          if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
-            spotifySong = sSong;
-            spotifyArtist = sArtist;
-            spotifyPlaying = sPlaying;
-            lastSpotifyFetch = time(nullptr);
-            xSemaphoreGive(spotifyMutex);
+            if (spotifyMutex && xSemaphoreTake(spotifyMutex, pdMS_TO_TICKS(1000))) {
+              spotifySong = sSong;
+              spotifyArtist = sArtist;
+              spotifyPlaying = sPlaying;
+              lastSpotifyFetch = time(nullptr);
+              xSemaphoreGive(spotifyMutex);
+              got = true;
+              dataDirty = true;
+            } else {
+              Serial.println("[Spotify] Mutex timeout");
+            }
           }
-          got = true;
-          dataDirty = true;
+        } else {
+          Serial.printf("[Spotify] JSON err: %s\n", err.c_str());
         }
       }
+    } else {
+      Serial.printf("[Spotify] GET failed, code: %d\n", code);
     }
     http.end();
+  } else {
+    Serial.println("[Spotify] http.begin failed");
   }
 
   if (got || spotifyUrl.length() >= 10) {
-    if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
+    if (spotifyMutex && xSemaphoreTake(spotifyMutex, pdMS_TO_TICKS(1000))) {
       lastSpotifyFetch = time(nullptr);
       lastSyncTime = lastSpotifyFetch;
       xSemaphoreGive(spotifyMutex);
@@ -1946,7 +2062,7 @@ static bool fetchGithubData() {
       }
 
       if (count > 0 || parsedLastYear > 0) {
-        if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
+        if (githubMutex && xSemaphoreTake(githubMutex, pdMS_TO_TICKS(1000))) {
           for (int i = 0; i < 14; i++) {
             githubLevels[i] = tempLevels[(count + i) % 14];
             githubCounts[i] = tempCounts[(count + i) % 14];
@@ -1974,7 +2090,7 @@ static bool fetchSteamStatus() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(5000); // 10s -> 5s
+  http.setTimeout(8000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   String urlStatus = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key="
@@ -1982,28 +2098,48 @@ static bool fetchSteamStatus() {
 
   bool got = false;
   if (http.begin(client, urlStatus)) {
-    if (http.GET() == 200) {
-      String body = http.getString();
-      DynamicJsonDocument doc(768);
-      if (!deserializeJson(doc, body)) {
-        auto player = doc["response"]["players"][0];
-        bool online = (player["personastate"].as<int>() != 0);
-        String curGame = "";
-        if (player.containsKey("gameextrainfo")) {
-          curGame = player["gameextrainfo"].as<String>();
-          cleanTr(curGame);
+    int code = http.GET();
+    if (code == 200) {
+      int len = http.getSize();
+      if (len > 10000) {
+        Serial.printf("[SteamStatus] Body too large: %d\n", len);
+      } else {
+        String body = http.getString();
+        DynamicJsonDocument doc(1024);
+        DeserializationError err = deserializeJson(doc, body);
+        if (!err) {
+          if (doc.containsKey("response") && doc["response"].containsKey("players")) {
+            auto players = doc["response"]["players"];
+            if (players.size() > 0) {
+              auto player = players[0];
+              bool online = (player["personastate"] | 0) != 0;
+              String curGame = "";
+              if (player.containsKey("gameextrainfo")) {
+                curGame = player["gameextrainfo"].as<String>();
+                cleanTr(curGame);
+              }
+              if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
+                steamIsOnline = online;
+                steamCurrentGame = curGame;
+                lastSteamStatusFetch = time(nullptr);
+                xSemaphoreGive(steamMutex);
+                got = true;
+                dataDirty = true;
+              } else {
+                Serial.println("[SteamStatus] Mutex timeout");
+              }
+            }
+          }
+        } else {
+          Serial.printf("[SteamStatus] JSON err: %s\n", err.c_str());
         }
-        if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
-          steamIsOnline = online;
-          steamCurrentGame = curGame;
-          lastSteamStatusFetch = time(nullptr);
-          xSemaphoreGive(steamMutex);
-        }
-        got = true;
-        dataDirty = true;
       }
+    } else {
+      Serial.printf("[SteamStatus] GET failed, code: %d\n", code);
     }
     http.end();
+  } else {
+    Serial.println("[SteamStatus] http.begin failed");
   }
   return got;
 }
@@ -2015,60 +2151,72 @@ static bool fetchSteamRecent() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(5000); // 15s -> 5s
+  http.setTimeout(8000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
-  // 5 oyun cekelim ki su an oynanani listede bulabilelim
   String urlRecent = "https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key="
     + steamApiKey + "&steamid=" + steamId + "&count=5&format=json";
 
   bool got = false;
   if (http.begin(client, urlRecent)) {
-    if (http.GET() == 200) {
-      String body = http.getString();
-      DynamicJsonDocument doc(2048); // 5 oyun icin biraz daha yer
-      if (!deserializeJson(doc, body)) {
-        auto games = doc["response"]["games"];
-        if (games.size() > 0) {
-          // Varsayilan olarak en son oynanani al (index 0)
-          String gName = games[0]["name"].as<String>();
-          int pt2w = games[0]["playtime_2weeks"].as<int>();
-          int ptAll = games[0]["playtime_forever"].as<int>();
-          cleanTr(gName);
+    int code = http.GET();
+    if (code == 200) {
+      int len = http.getSize();
+      if (len > 15000) {
+        Serial.printf("[SteamRecent] Body too large: %d\n", len);
+      } else {
+        String body = http.getString();
+        DynamicJsonDocument doc(2048);
+        DeserializationError err = deserializeJson(doc, body);
+        if (!err) {
+          if (doc.containsKey("response") && doc["response"].containsKey("games")) {
+            auto games = doc["response"]["games"];
+            if (games.size() > 0) {
+              String gName = games[0]["name"] | "";
+              int pt2w = games[0]["playtime_2weeks"] | 0;
+              int ptAll = games[0]["playtime_forever"] | 0;
+              cleanTr(gName);
 
-          // Eger su an bir oyun oynuyorsak (steamCurrentGame doluysa),
-          // listede o oyunu bulup onun saatlerini alalim.
-          if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
-            String target = steamCurrentGame;
-            xSemaphoreGive(steamMutex);
-            
-            if (target.length() > 0) {
-              for (int i = 0; i < games.size(); i++) {
-                String gn = games[i]["name"].as<String>();
-                cleanTr(gn);
-                if (gn == target) {
-                  gName = gn;
-                  pt2w = games[i]["playtime_2weeks"].as<int>();
-                  ptAll = games[i]["playtime_forever"].as<int>();
-                  break;
+              String target = "";
+              if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
+                target = steamCurrentGame;
+                xSemaphoreGive(steamMutex);
+              }
+
+              if (target.length() > 0) {
+                for (int i = 0; i < (int)games.size(); i++) {
+                  String gn = games[i]["name"] | "";
+                  cleanTr(gn);
+                  if (gn == target) {
+                    gName = gn;
+                    pt2w = games[i]["playtime_2weeks"] | 0;
+                    ptAll = games[i]["playtime_forever"] | 0;
+                    break;
+                  }
                 }
+              }
+
+              if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
+                steamGameName = gName;
+                steamPlaytime2Weeks = pt2w;
+                steamPlaytimeForever = ptAll;
+                lastSteamFetch = time(nullptr);
+                xSemaphoreGive(steamMutex);
+                got = true;
+                dataDirty = true;
               }
             }
           }
-
-          if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
-            steamGameName = gName;
-            steamPlaytime2Weeks = pt2w;
-            steamPlaytimeForever = ptAll;
-            lastSteamFetch = time(nullptr);
-            xSemaphoreGive(steamMutex);
-          }
-          got = true;
-          dataDirty = true;
+        } else {
+          Serial.printf("[SteamRecent] JSON err: %s\n", err.c_str());
         }
       }
+    } else {
+      Serial.printf("[SteamRecent] GET failed, code: %d\n", code);
     }
     http.end();
+  } else {
+    Serial.println("[SteamRecent] http.begin failed");
   }
   return got;
 }
@@ -2081,7 +2229,7 @@ void networkFetchTask(void *pvParameters) {
       // Spotify Data
       if (isWidgetActive(HOME_WIDGET_SPOTIFY) && spotifyUrl.length() >= 10) {
         time_t lastS = 0;
-        if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
+        if (spotifyMutex && xSemaphoreTake(spotifyMutex, pdMS_TO_TICKS(1000))) {
           lastS = lastSpotifyFetch;
           xSemaphoreGive(spotifyMutex);
         }
@@ -2093,7 +2241,7 @@ void networkFetchTask(void *pvParameters) {
       // Calendar Data
       if (isWidgetActive(HOME_WIDGET_CALENDAR) && calendarUrl.length() >= 10) {
         time_t lastC = 0;
-        if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
+        if (calendarMutex && xSemaphoreTake(calendarMutex, pdMS_TO_TICKS(1000))) {
           lastC = lastCalendarFetch;
           xSemaphoreGive(calendarMutex);
         }
@@ -2105,7 +2253,7 @@ void networkFetchTask(void *pvParameters) {
       // GitHub Data
       if (isWidgetActive(HOME_WIDGET_GITHUB) && githubUser.length() >= 2) {
         time_t lastG = 0;
-        if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
+        if (githubMutex && xSemaphoreTake(githubMutex, pdMS_TO_TICKS(1000))) {
           lastG = lastGithubFetch;
           xSemaphoreGive(githubMutex);
         }
@@ -2118,7 +2266,7 @@ void networkFetchTask(void *pvParameters) {
       // Steam - Durum (online/oynuyor): 2 dakikada bir
       if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
         time_t lastSt = 0;
-        if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
+        if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
           lastSt = lastSteamStatusFetch;
           xSemaphoreGive(steamMutex);
         }
@@ -2130,7 +2278,7 @@ void networkFetchTask(void *pvParameters) {
       // Steam - Son oyun/saatler: 30 dakikada bir
       if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
         time_t lastSr = 0;
-        if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
+        if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
           lastSr = lastSteamFetch;
           xSemaphoreGive(steamMutex);
         }
@@ -3202,7 +3350,7 @@ void drawCalendarHomeWidget(int x, int y, int w, int h, String &cache,
                             bool force = false) {
   String localTime = "--:--";
   String localTitle = "Bekleniyor...";
-  if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
+  if (calendarMutex && xSemaphoreTake(calendarMutex, pdMS_TO_TICKS(1000))) {
     localTime = nextEventTime;
     localTitle = nextEventTitle;
     xSemaphoreGive(calendarMutex);
@@ -3218,7 +3366,7 @@ void drawGithubHomeWidget(int x, int y, int w, int h, String &cache,
   int localTotalLastYear = 0;
   String localUser = "";
   
-  if (githubMutex && xSemaphoreTake(githubMutex, portMAX_DELAY)) {
+  if (githubMutex && xSemaphoreTake(githubMutex, pdMS_TO_TICKS(1000))) {
     memcpy(localLevels, githubLevels, 14);
     memcpy(localCounts, githubCounts, sizeof(int) * 14);
     localTotalLastYear = githubTotalLastYear;
@@ -3294,7 +3442,7 @@ void drawSpotifyHomeWidget(int x, int y, int w, int h, String &cache,
   String localArtist = "";
   bool localPlaying = false;
 
-  if (spotifyMutex && xSemaphoreTake(spotifyMutex, portMAX_DELAY)) {
+  if (spotifyMutex && xSemaphoreTake(spotifyMutex, pdMS_TO_TICKS(1000))) {
     localSong = spotifySong;
     localArtist = spotifyArtist;
     localPlaying = spotifyPlaying;
@@ -3424,7 +3572,7 @@ void drawSteamHomeWidget(int x, int y, int w, int h, String &cache,
   bool   localOnline = false;
   int    localPt2w = -1;
   int    localPtAll = -1;
-  if (steamMutex && xSemaphoreTake(steamMutex, portMAX_DELAY)) {
+  if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
     localGame    = steamGameName;
     localCurrent = steamCurrentGame;
     localOnline  = steamIsOnline;
@@ -4358,7 +4506,7 @@ static bool wasMeetingFlashing = false;
 
 void updateMeetingFlashState() {
   String localTime = "--";
-  if (calendarMutex && xSemaphoreTake(calendarMutex, portMAX_DELAY)) {
+  if (calendarMutex && xSemaphoreTake(calendarMutex, pdMS_TO_TICKS(1000))) {
     localTime = nextEventTime;
     xSemaphoreGive(calendarMutex);
   }
