@@ -2332,133 +2332,6 @@ void networkFetchTask(void *pvParameters) {
 // =========================================================
 // DRAW HELPERS
 // =========================================================
-void fetchQbittorrentData() {
-  if (qbUrl.length() < 5) return;
-
-  HTTPClient http;
-  http.setReuse(true);
-  http.setTimeout(4000);
-
-  const char* headerKeys[] = {"Set-Cookie"};
-  http.collectHeaders(headerKeys, 1);
-
-  // 1. Check if we have SID. If not, login.
-  if (qbSID == "") {
-    String loginUrl = qbUrl;
-    if (!loginUrl.endsWith("/")) loginUrl += "/";
-    loginUrl += "api/v2/auth/login";
-
-    http.begin(loginUrl);
-    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    String body = "username=" + qbUser + "&password=" + qbPass;
-    int code = http.POST(body);
-
-    if (code == 200) {
-      String cookie = http.header("Set-Cookie");
-      int start = cookie.indexOf("SID=");
-      if (start != -1) {
-        int end = cookie.indexOf(';', start);
-        qbSID = (end == -1) ? cookie.substring(start) : cookie.substring(start, end);
-      }
-    }
-    http.end();
-  }
-
-  if (qbSID == "") return;
-
-  // 2. Fetch Transfer Info
-  String infoUrl = qbUrl;
-  if (!infoUrl.endsWith("/")) infoUrl += "/";
-  infoUrl += "api/v2/transfer/info";
-
-  http.begin(infoUrl);
-  http.addHeader("Cookie", qbSID);
-  int code = http.GET();
-
-  if (code == 200) {
-    String payload = http.getString();
-    DynamicJsonDocument doc(1024);
-    DeserializationError err = deserializeJson(doc, payload);
-    if (!err) {
-      if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
-        qbDownSpeed = doc["dl_info_speed"] | 0;
-        qbUpSpeed = doc["up_info_speed"] | 0;
-        lastQbitFetch = time(nullptr);
-        xSemaphoreGive(qbMutex);
-      }
-    }
-  } else if (code == 403) {
-    qbSID = "";
-  }
-  http.end();
-
-  // 3. Fetch Active Count
-  String torrentsUrl = qbUrl;
-  if (!torrentsUrl.endsWith("/")) torrentsUrl += "/";
-  torrentsUrl += "api/v2/torrents/info?filter=active";
-
-  http.begin(torrentsUrl);
-  http.addHeader("Cookie", qbSID);
-  code = http.GET();
-  if (code == 200) {
-    String payload = http.getString();
-    DynamicJsonDocument doc(2048);
-    DeserializationError err = deserializeJson(doc, payload);
-    if (!err && doc.is<JsonArray>()) {
-      if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
-        qbActiveCount = doc.as<JsonArray>().size();
-        xSemaphoreGive(qbMutex);
-      }
-    }
-  }
-  http.end();
-}
-
-String formatQbSpeed(uint32_t bytesPerSec) {
-  float speed = (float)bytesPerSec;
-  if (speed < 1024) return String(speed, 0) + " B/s";
-  speed /= 1024.0f;
-  if (speed < 1024) return String(speed, 1) + " KB/s";
-  speed /= 1024.0f;
-  return String(speed, 1) + " MB/s";
-}
-
-void drawQbittorrentHomeWidget(int x, int y, int w, int h, String &cache, bool force = false) {
-  uint32_t dls = 0, ups = 0;
-  int active = 0;
-  if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
-    dls = qbDownSpeed;
-    ups = qbUpSpeed;
-    active = qbActiveCount;
-    xSemaphoreGive(qbMutex);
-  }
-
-  String combined = String(dls) + "|" + String(ups) + "|" + String(active);
-  if (!force && combined == cache) return;
-  cache = combined;
-
-  makeSpriteCard(sprSmall, w, h, true);
-  sprSmall.setTextDatum(TL_DATUM);
-  sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString("qBittorrent", 10, 8, 2);
-
-  sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
-  sprSmall.drawString("DL:", 10, 28, 1);
-  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  sprSmall.drawString(formatQbSpeed(dls), 35, 26, 2);
-
-  sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString("UL:", 10, 48, 1);
-  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  sprSmall.drawString(formatQbSpeed(ups), 35, 46, 2);
-
-  if (active > 0) {
-    sprSmall.setTextColor(COL_GREEN, COL_PANEL);
-    sprSmall.drawRightString(String(active) + " aktif", w - 10, 8, 1);
-  }
-
-  pushSpriteAndDelete(sprSmall, x, y);
-}
 
 void drawCard(int x, int y, int w, int h, bool accent = false) {
   tft.fillRoundRect(x, y, w, h, 10, COL_PANEL);
@@ -2699,6 +2572,135 @@ void pushSpriteAndDelete(TFT_eSprite &spr, int x, int y) {
 void pushSpriteAndKeep(TFT_eSprite &spr, int x, int y) {
   pushSpriteToScreen(spr, x, y);
 }
+
+void fetchQbittorrentData() {
+  if (qbUrl.length() < 5) return;
+
+  HTTPClient http;
+  http.setReuse(true);
+  http.setTimeout(4000);
+
+  const char* headerKeys[] = {"Set-Cookie"};
+  http.collectHeaders(headerKeys, 1);
+
+  // 1. Check if we have SID. If not, login.
+  if (qbSID == "") {
+    String loginUrl = qbUrl;
+    if (!loginUrl.endsWith("/")) loginUrl += "/";
+    loginUrl += "api/v2/auth/login";
+
+    http.begin(loginUrl);
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    String body = "username=" + qbUser + "&password=" + qbPass;
+    int code = http.POST(body);
+
+    if (code == 200) {
+      String cookie = http.header("Set-Cookie");
+      int start = cookie.indexOf("SID=");
+      if (start != -1) {
+        int end = cookie.indexOf(';', start);
+        qbSID = (end == -1) ? cookie.substring(start) : cookie.substring(start, end);
+      }
+    }
+    http.end();
+  }
+
+  if (qbSID == "") return;
+
+  // 2. Fetch Transfer Info
+  String infoUrl = qbUrl;
+  if (!infoUrl.endsWith("/")) infoUrl += "/";
+  infoUrl += "api/v2/transfer/info";
+
+  http.begin(infoUrl);
+  http.addHeader("Cookie", qbSID);
+  int code = http.GET();
+
+  if (code == 200) {
+    String payload = http.getString();
+    DynamicJsonDocument doc(1024);
+    DeserializationError err = deserializeJson(doc, payload);
+    if (!err) {
+      if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
+        qbDownSpeed = doc["dl_info_speed"] | 0;
+        qbUpSpeed = doc["up_info_speed"] | 0;
+        lastQbitFetch = time(nullptr);
+        xSemaphoreGive(qbMutex);
+      }
+    }
+  } else if (code == 403) {
+    qbSID = "";
+  }
+  http.end();
+
+  // 3. Fetch Active Count
+  String torrentsUrl = qbUrl;
+  if (!torrentsUrl.endsWith("/")) torrentsUrl += "/";
+  torrentsUrl += "api/v2/torrents/info?filter=active";
+
+  http.begin(torrentsUrl);
+  http.addHeader("Cookie", qbSID);
+  code = http.GET();
+  if (code == 200) {
+    String payload = http.getString();
+    DynamicJsonDocument doc(2048);
+    DeserializationError err = deserializeJson(doc, payload);
+    if (!err && doc.is<JsonArray>()) {
+      if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
+        qbActiveCount = doc.as<JsonArray>().size();
+        xSemaphoreGive(qbMutex);
+      }
+    }
+  }
+  http.end();
+}
+
+String formatQbSpeed(uint32_t bytesPerSec) {
+  float speed = (float)bytesPerSec;
+  if (speed < 1024) return String(speed, 0) + " B/s";
+  speed /= 1024.0f;
+  if (speed < 1024) return String(speed, 1) + " KB/s";
+  speed /= 1024.0f;
+  return String(speed, 1) + " MB/s";
+}
+
+void drawQbittorrentHomeWidget(int x, int y, int w, int h, String &cache, bool force = false) {
+  uint32_t dls = 0, ups = 0;
+  int active = 0;
+  if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
+    dls = qbDownSpeed;
+    ups = qbUpSpeed;
+    active = qbActiveCount;
+    xSemaphoreGive(qbMutex);
+  }
+
+  String combined = String(dls) + "|" + String(ups) + "|" + String(active);
+  if (!force && combined == cache) return;
+  cache = combined;
+
+  makeSpriteCard(sprSmall, w, h, true);
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("qBittorrent", 10, 8, 2);
+
+  sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
+  sprSmall.drawString("DL:", 10, 28, 1);
+  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  sprSmall.drawString(formatQbSpeed(dls), 35, 26, 2);
+
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("UL:", 10, 48, 1);
+  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  sprSmall.drawString(formatQbSpeed(ups), 35, 46, 2);
+
+  if (active > 0) {
+    sprSmall.setTextColor(COL_GREEN, COL_PANEL);
+    sprSmall.drawRightString(String(active) + " aktif", w - 10, 8, 1);
+  }
+
+  pushSpriteAndDelete(sprSmall, x, y);
+}
+
 
 void drawFinanceHomeWidget(int x, int y, int w, int h, String &cache,
                            bool force = false) {
