@@ -2681,17 +2681,18 @@ void drawQbittorrentHomeWidget(int x, int y, int w, int h, String &cache, bool f
   makeSpriteCard(sprSmall, w, h, true);
   sprSmall.setTextDatum(TL_DATUM);
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString("qBittorrent", 10, 8, 2);
+  sprSmall.drawString("qBit", 10, 8, 2);
 
   sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
-  sprSmall.drawString("DL:", 10, 28, 1);
+  sprSmall.drawString("DW:", 10, 28, 1);
   sprSmall.setTextColor(COL_TEXT, COL_PANEL);
   sprSmall.drawString(formatQbSpeed(dls), 35, 26, 2);
 
   sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString("UL:", 10, 48, 1);
+  sprSmall.drawString("UP:", 10, 48, 1);
   sprSmall.setTextColor(COL_TEXT, COL_PANEL);
   sprSmall.drawString(formatQbSpeed(ups), 35, 46, 2);
+
 
   if (active > 0) {
     sprSmall.setTextColor(COL_GREEN, COL_PANEL);
