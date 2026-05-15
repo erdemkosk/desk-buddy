@@ -61,6 +61,11 @@ extern String qbUser;
 extern String qbPass;
 extern String qbSID;
 extern time_t lastQbitFetch;
+ 
+extern String octoUrl;
+extern String octoKey;
+extern time_t lastOctoFetch;
+
 
 
 
@@ -706,6 +711,19 @@ static void handleRoot() {
   page += "</div>";
   page += "<div class='muted' style='margin-top:10px;'>Not: Ayarlardan 'Bypass authentication for clients on localhost' seçeneğini açtıysanız kullanıcı adı ve şifre boş bırakılabilir.</div>";
   page += "</div></div>";
+ 
+  page += "<div class='panel' data-panel='octo'>";
+  page += "<button type='button' class='panel-toggle' "
+          "aria-expanded='true'><h2>OctoPrint</h2><span "
+          "class='panel-chevron'>&#9662;</span></button>";
+  page += "<div class='panel-body'>";
+  page += "<p>3D Yazıcı durumunu takip etmek için OctoPrint bilgilerini girin.</p>";
+  page += "<label class='label'>OctoPrint URL (IP:Port)</label>";
+  page += "<input type='text' name='octoUrl' value='" + htmlEscape(octoUrl) + "' placeholder='http://192.168.1.15:5000'>";
+  page += "<div style='margin-top:10px;'><label class='label'>API Key</label>";
+  page += "<input type='text' name='octoKey' value='" + htmlEscape(octoKey) + "' placeholder='XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'></div>";
+  page += "</div></div>";
+
 
 
   page += "<div class='panel' data-panel='tabs'>";
@@ -827,6 +845,9 @@ static void handleSave() {
   String newQbUrl = server.hasArg("qbUrl") ? server.arg("qbUrl") : qbUrl;
   String newQbUser = server.hasArg("qbUser") ? server.arg("qbUser") : qbUser;
   String newQbPass = server.hasArg("qbPass") ? server.arg("qbPass") : qbPass;
+  String newOctoUrl = server.hasArg("octoUrl") ? server.arg("octoUrl") : octoUrl;
+  String newOctoKey = server.hasArg("octoKey") ? server.arg("octoKey") : octoKey;
+
 
   newCalUrl.trim();
   String newSpotifyUrl =
@@ -915,6 +936,9 @@ static void handleSave() {
   qbUrl = newQbUrl;
   qbUser = newQbUser;
   qbPass = newQbPass;
+  octoUrl = newOctoUrl;
+  octoKey = newOctoKey;
+
 
   for (int p = 0; p < 3; p++) {
     tabNames[p] = newTabNames[p];
@@ -952,6 +976,9 @@ static void handleSave() {
   prefs.putString("qbUrl", qbUrl);
   prefs.putString("qbUser", qbUser);
   prefs.putString("qbPass", qbPass);
+  prefs.putString("octoUrl", octoUrl);
+  prefs.putString("octoKey", octoKey);
+
 
   for (int p = 0; p < 3; p++) {
     prefs.putString(("t_name" + String(p)).c_str(), tabNames[p]);
@@ -976,6 +1003,8 @@ static void handleSave() {
   lastSteamFetch = 0;
   lastQbitFetch = 0;
   qbSID = "";
+  lastOctoFetch = 0;
+
 
 
   notesDirty = true;
