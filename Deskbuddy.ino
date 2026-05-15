@@ -2767,8 +2767,19 @@ void fetchOctoprintData() {
         xSemaphoreGive(octoMutex);
       }
     }
+  } else {
+    if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
+      octoState = "Offline";
+      octoProgress = 0;
+      octoToolTemp = 0;
+      octoBedTemp = 0;
+      lastOctoFetch = time(nullptr); // Hata durumunu da bir sure hatirlayalim
+      xSemaphoreGive(octoMutex);
+    }
   }
   http.end();
+
+  if (octoState == "Offline") return;
 
   // 2. Fetch Printer Info (Temps)
   String printerUrl = octoUrl;
@@ -2790,6 +2801,7 @@ void fetchOctoprintData() {
       }
     }
   }
+
   http.end();
 }
 
