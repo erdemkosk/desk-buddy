@@ -247,6 +247,31 @@ const uint32_t STEAM_STATUS_INTERVAL_SEC = 2 * 60;  // online/oynuyor: 2 dk
 const uint32_t STEAM_RECENT_INTERVAL_SEC = 30 * 60; // son oyun/sureler: 30 dk
 const unsigned long STEAM_ROTATE_MS = 8000UL; // mod ekrani donusu
 SemaphoreHandle_t steamMutex = NULL;
+ 
+// qBittorrent
+String qbUrl = "";
+String qbUser = "";
+String qbPass = "";
+String qbSID = "";
+uint32_t qbDownSpeed = 0;
+uint32_t qbUpSpeed = 0;
+int qbActiveCount = 0;
+time_t lastQbitFetch = 0;
+const uint32_t QBIT_INTERVAL_SEC = 20;
+SemaphoreHandle_t qbMutex = NULL;
+ 
+// OctoPrint
+String octoUrl = "";
+String octoKey = "";
+String octoState = "Unknown";
+float octoProgress = 0;
+float octoToolTemp = 0;
+float octoBedTemp = 0;
+time_t lastOctoFetch = 0;
+const uint32_t OCTO_INTERVAL_SEC = 30;
+SemaphoreHandle_t octoMutex = NULL;
+
+
 
 const char *homeWidgetKey(HomeWidgetType type) {
   switch (type) {
@@ -282,8 +307,14 @@ const char *homeWidgetKey(HomeWidgetType type) {
     return "water";
   case HOME_WIDGET_STEAM:
     return "steam";
+  case HOME_WIDGET_QBITTORRENT:
+    return "qbit";
+  case HOME_WIDGET_OCTOPRINT:
+    return "octo";
   default:
     return "humidity";
+
+
   }
 }
 
@@ -321,8 +352,14 @@ const char *homeWidgetLabel(HomeWidgetType type) {
     return "Su";
   case HOME_WIDGET_STEAM:
     return "Steam";
+  case HOME_WIDGET_QBITTORRENT:
+    return "qBittorrent";
+  case HOME_WIDGET_OCTOPRINT:
+    return "OctoPrint";
   default:
     return "Nem";
+
+
   }
 }
 
@@ -359,7 +396,13 @@ HomeWidgetType homeWidgetFromKey(const String &key) {
     return HOME_WIDGET_WATER;
   if (key == "steam")
     return HOME_WIDGET_STEAM;
+  if (key == "qbit")
+    return HOME_WIDGET_QBITTORRENT;
+  if (key == "octo")
+    return HOME_WIDGET_OCTOPRINT;
   return HOME_WIDGET_HUMIDITY;
+
+
 }
 
 const char *homeSlotLabel(int slot) {
@@ -397,7 +440,8 @@ void appendHomeWidgetOptions(String &page, const String &selectedKey) {
       HOME_WIDGET_WIND,     HOME_WIDGET_SUN,   HOME_WIDGET_FINANCE,
       HOME_WIDGET_BUDDY,    HOME_WIDGET_NOTES, HOME_WIDGET_CALENDAR,
       HOME_WIDGET_SPOTIFY,  HOME_WIDGET_GITHUB, HOME_WIDGET_WATER,
-      HOME_WIDGET_STEAM};
+      HOME_WIDGET_STEAM,    HOME_WIDGET_QBITTORRENT,
+      HOME_WIDGET_OCTOPRINT};
 
   for (HomeWidgetType type : types) {
     const char *key = homeWidgetKey(type);
@@ -1308,6 +1352,13 @@ void loadStoredSettings() {
   githubUser = prefs.getString("githubUser", "");
   steamApiKey = prefs.getString("steamKey", "");
   steamId = prefs.getString("steamId", "");
+  qbUrl = prefs.getString("qbUrl", "");
+  qbUser = prefs.getString("qbUser", "");
+  qbPass = prefs.getString("qbPass", "");
+  octoUrl = prefs.getString("octoUrl", "");
+  octoKey = prefs.getString("octoKey", "");
+
+
 
   waterCount = prefs.getInt("w_cnt", 0);
   waterGoal = prefs.getInt("w_goal", 8);
@@ -2286,14 +2337,40 @@ void networkFetchTask(void *pvParameters) {
           fetchSteamRecent();
         }
       }
+      // qBittorrent Data
+      if (isWidgetActive(HOME_WIDGET_QBITTORRENT) && qbUrl.length() >= 8) {
+        time_t lastQ = 0;
+        if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
+          lastQ = lastQbitFetch;
+          xSemaphoreGive(qbMutex);
+        }
+        if (lastQ == 0 || (nowT - lastQ) > QBIT_INTERVAL_SEC) {
+          fetchQbittorrentData();
+        }
+      }
+
+      // OctoPrint Data
+      if (isWidgetActive(HOME_WIDGET_OCTOPRINT) && octoUrl.length() >= 8 && octoKey.length() >= 5) {
+        time_t lastO = 0;
+        if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
+          lastO = lastOctoFetch;
+          xSemaphoreGive(octoMutex);
+        }
+        if (lastO == 0 || (nowT - lastO) > OCTO_INTERVAL_SEC) {
+          fetchOctoprintData();
+        }
+      }
     }
     vTaskDelay(1000 / portTICK_PERIOD_MS);
+
   }
 }
+
 
 // =========================================================
 // DRAW HELPERS
 // =========================================================
+
 void drawCard(int x, int y, int w, int h, bool accent = false) {
   tft.fillRoundRect(x, y, w, h, 10, COL_PANEL);
   tft.drawRoundRect(x, y, w, h, 10, accent ? COL_ACCENT : COL_STROKE);
@@ -2533,6 +2610,259 @@ void pushSpriteAndDelete(TFT_eSprite &spr, int x, int y) {
 void pushSpriteAndKeep(TFT_eSprite &spr, int x, int y) {
   pushSpriteToScreen(spr, x, y);
 }
+
+void fetchQbittorrentData() {
+  if (qbUrl.length() < 5) return;
+
+  HTTPClient http;
+  http.setReuse(true);
+  http.setTimeout(4000);
+
+  const char* headerKeys[] = {"Set-Cookie"};
+  http.collectHeaders(headerKeys, 1);
+
+  // 1. Check if we have SID. If not, login.
+  if (qbSID == "") {
+    String loginUrl = qbUrl;
+    if (!loginUrl.endsWith("/")) loginUrl += "/";
+    loginUrl += "api/v2/auth/login";
+
+    http.begin(loginUrl);
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    String body = "username=" + qbUser + "&password=" + qbPass;
+    int code = http.POST(body);
+
+    if (code == 200) {
+      String cookie = http.header("Set-Cookie");
+      int start = cookie.indexOf("SID=");
+      if (start != -1) {
+        int end = cookie.indexOf(';', start);
+        qbSID = (end == -1) ? cookie.substring(start) : cookie.substring(start, end);
+      }
+    }
+    http.end();
+  }
+
+  if (qbSID == "") return;
+
+  // 2. Fetch Transfer Info
+  String infoUrl = qbUrl;
+  if (!infoUrl.endsWith("/")) infoUrl += "/";
+  infoUrl += "api/v2/transfer/info";
+
+  http.begin(infoUrl);
+  http.addHeader("Cookie", qbSID);
+  int code = http.GET();
+
+  if (code == 200) {
+    String payload = http.getString();
+    DynamicJsonDocument doc(1024);
+    DeserializationError err = deserializeJson(doc, payload);
+    if (!err) {
+      if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
+        qbDownSpeed = doc["dl_info_speed"] | 0;
+        qbUpSpeed = doc["up_info_speed"] | 0;
+        lastQbitFetch = time(nullptr);
+        xSemaphoreGive(qbMutex);
+      }
+    }
+  } else if (code == 403) {
+    qbSID = "";
+  }
+  http.end();
+
+  // 3. Fetch Active Count
+  String torrentsUrl = qbUrl;
+  if (!torrentsUrl.endsWith("/")) torrentsUrl += "/";
+  torrentsUrl += "api/v2/torrents/info?filter=active";
+
+  http.begin(torrentsUrl);
+  http.addHeader("Cookie", qbSID);
+  code = http.GET();
+  if (code == 200) {
+    String payload = http.getString();
+    DynamicJsonDocument doc(2048);
+    DeserializationError err = deserializeJson(doc, payload);
+    if (!err && doc.is<JsonArray>()) {
+      if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
+        qbActiveCount = doc.as<JsonArray>().size();
+        xSemaphoreGive(qbMutex);
+      }
+    }
+  }
+  http.end();
+}
+
+String formatQbSpeed(uint32_t bytesPerSec) {
+  float speed = (float)bytesPerSec;
+  if (speed < 1024) return String(speed, 0) + " B/s";
+  speed /= 1024.0f;
+  if (speed < 1024) return String(speed, 1) + " KB/s";
+  speed /= 1024.0f;
+  return String(speed, 1) + " MB/s";
+}
+
+void drawQbittorrentHomeWidget(int x, int y, int w, int h, String &cache, bool force = false) {
+  uint32_t dls = 0, ups = 0;
+  int active = 0;
+  if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
+    dls = qbDownSpeed;
+    ups = qbUpSpeed;
+    active = qbActiveCount;
+    xSemaphoreGive(qbMutex);
+  }
+
+  String combined = String(dls) + "|" + String(ups) + "|" + String(active);
+  if (!force && combined == cache) return;
+  cache = combined;
+
+  makeSpriteCard(sprSmall, w, h, true);
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("qBit", 10, 8, 2);
+
+  sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
+  sprSmall.drawString("DW:", 10, 28, 1);
+  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  sprSmall.drawString(formatQbSpeed(dls), 35, 26, 2);
+
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("UP:", 10, 48, 1);
+  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  sprSmall.drawString(formatQbSpeed(ups), 35, 46, 2);
+
+
+  if (active > 0) {
+    sprSmall.setTextColor(COL_GREEN, COL_PANEL);
+    sprSmall.drawRightString(String(active) + " aktif", w - 10, 8, 1);
+  }
+
+  pushSpriteAndDelete(sprSmall, x, y);
+}
+
+void fetchOctoprintData() {
+  if (octoUrl.length() < 5 || octoKey.length() < 5) return;
+
+  HTTPClient http;
+  http.setReuse(true);
+  http.setTimeout(4000);
+
+  // 1. Fetch Job Info
+  String jobUrl = octoUrl;
+  if (!jobUrl.endsWith("/")) jobUrl += "/";
+  jobUrl += "api/job";
+
+  http.begin(jobUrl);
+  http.addHeader("X-Api-Key", octoKey);
+  int code = http.GET();
+  if (code == 200) {
+    String payload = http.getString();
+    DynamicJsonDocument doc(2048);
+    DeserializationError err = deserializeJson(doc, payload);
+    if (!err) {
+      if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
+        octoState = doc["state"].as<String>();
+        octoProgress = doc["progress"]["completion"] | 0.0f;
+        lastOctoFetch = time(nullptr);
+        xSemaphoreGive(octoMutex);
+      }
+    }
+  } else {
+    if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
+      octoState = "Offline";
+      octoProgress = 0;
+      octoToolTemp = 0;
+      octoBedTemp = 0;
+      lastOctoFetch = time(nullptr); // Hata durumunu da bir sure hatirlayalim
+      xSemaphoreGive(octoMutex);
+    }
+  }
+  http.end();
+
+  if (octoState == "Offline") return;
+
+  // 2. Fetch Printer Info (Temps)
+  String printerUrl = octoUrl;
+  if (!printerUrl.endsWith("/")) printerUrl += "/";
+  printerUrl += "api/printer";
+
+  http.begin(printerUrl);
+  http.addHeader("X-Api-Key", octoKey);
+  code = http.GET();
+  if (code == 200) {
+    String payload = http.getString();
+    DynamicJsonDocument doc(2048);
+    DeserializationError err = deserializeJson(doc, payload);
+    if (!err) {
+      if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
+        octoToolTemp = doc["temperature"]["tool0"]["actual"] | 0.0f;
+        octoBedTemp = doc["temperature"]["bed"]["actual"] | 0.0f;
+        xSemaphoreGive(octoMutex);
+      }
+    }
+  }
+
+  http.end();
+}
+
+void drawOctoprintHomeWidget(int x, int y, int w, int h, String &cache, bool force = false) {
+  String state = "Offline";
+  float prog = 0, tool = 0, bed = 0;
+  if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
+    state = octoState;
+    prog = octoProgress;
+    tool = octoToolTemp;
+    bed = octoBedTemp;
+    xSemaphoreGive(octoMutex);
+  }
+
+  String combined = state + "|" + String(prog, 1) + "|" + String(tool, 1) + "|" + String(bed, 1);
+  if (!force && combined == cache) return;
+  cache = combined;
+
+  makeSpriteCard(sprSmall, w, h, true);
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("OctoPrint", 10, 8, 2);
+
+  // State dot
+  uint16_t stateCol = (state == "Printing") ? COL_GREEN : (state == "Operational" ? COL_BLUE : COL_RED);
+  sprSmall.fillCircle(w - 12, 16, 4, stateCol);
+
+  if (state == "Printing") {
+    // Progress Bar
+    int bw = w - 20;
+    int bh = 8;
+    int bx = 10;
+    int by = 30;
+    sprSmall.drawRoundRect(bx, by, bw, bh, 3, COL_STROKE);
+    int fillW = (int)((prog / 100.0f) * (bw - 4));
+    if (fillW > 0) {
+      sprSmall.fillRoundRect(bx + 2, by + 2, fillW, bh - 4, 2, COL_ACCENT);
+    }
+    sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+    sprSmall.drawCentreString(String(prog, 0) + "%", w / 2, by + 12, 1);
+  } else {
+    sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+    sprSmall.drawString(state, 10, 28, 2);
+  }
+
+  // Temps
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.drawString("T:", 10, 52, 1);
+  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  sprSmall.drawString(String(tool, 0) + "C", 25, 50, 2);
+
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  sprSmall.drawString("B:", w / 2 + 5, 52, 1);
+  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  sprSmall.drawString(String(bed, 0) + "C", w / 2 + 20, 50, 2);
+
+  pushSpriteAndDelete(sprSmall, x, y);
+}
+
+
 
 void drawFinanceHomeWidget(int x, int y, int w, int h, String &cache,
                            bool force = false) {
@@ -3746,8 +4076,16 @@ void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
   case HOME_WIDGET_STEAM:
     drawSteamHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
+  case HOME_WIDGET_QBITTORRENT:
+    drawQbittorrentHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
+    break;
+  case HOME_WIDGET_OCTOPRINT:
+    drawOctoprintHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
+    break;
   }
 }
+
+
 
 void drawFocusMenuOverlay(bool force = false) {
   String combined = String(focusTimerRunning ? 1 : 0) + "|" +
@@ -4481,10 +4819,14 @@ void setup() {
   calendarMutex = xSemaphoreCreateMutex();
   githubMutex = xSemaphoreCreateMutex();
   steamMutex = xSemaphoreCreateMutex();
-  if (spotifyMutex || calendarMutex || githubMutex || steamMutex) {
+  qbMutex = xSemaphoreCreateMutex();
+  octoMutex = xSemaphoreCreateMutex();
+  if (spotifyMutex || calendarMutex || githubMutex || steamMutex || qbMutex || octoMutex) {
     xTaskCreatePinnedToCore(networkFetchTask, "NetworkTask", 10240, NULL, 1,
                             NULL, 0);
   }
+
+
 
   setupWebServer();
 
