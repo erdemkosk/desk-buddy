@@ -55,6 +55,14 @@ extern time_t lastGithubFetch;
 extern String steamApiKey;
 extern String steamId;
 extern time_t lastSteamFetch;
+ 
+extern String qbUrl;
+extern String qbUser;
+extern String qbPass;
+extern String qbSID;
+extern time_t lastQbitFetch;
+
+
 
 extern int waterGoal;
 
@@ -681,6 +689,24 @@ static void handleRoot() {
   page += "Steam ID icin: <a href='https://steamid.io' target='_blank' style='color:#38bdf8;'>steamid.io</a></div>";
   page += "<div class='muted' style='margin-top:6px;'>Steam profilinizin herkese acik olmasi gerekiyor. Son 2 hafta icinde oynadiginiz oyun gosterilir.</div>";
   page += "</div></div>";
+ 
+  page += "<div class='panel' data-panel='qbit'>";
+  page += "<button type='button' class='panel-toggle' "
+          "aria-expanded='true'><h2>qBittorrent</h2><span "
+          "class='panel-chevron'>&#9662;</span></button>";
+  page += "<div class='panel-body'>";
+  page += "<p>Yerel ağdaki qBittorrent hızlarını takip etmek için bilgileri girin.</p>";
+  page += "<label class='label'>Web UI URL (IP:Port)</label>";
+  page += "<input type='text' name='qbUrl' value='" + htmlEscape(qbUrl) + "' placeholder='http://192.168.1.10:8080'>";
+  page += "<div class='grid' style='margin-top:10px;'>";
+  page += "<div><label class='label'>Kullanıcı Adı</label>";
+  page += "<input type='text' name='qbUser' value='" + htmlEscape(qbUser) + "'></div>";
+  page += "<div><label class='label'>Şifre</label>";
+  page += "<input type='password' name='qbPass' value='" + htmlEscape(qbPass) + "'></div>";
+  page += "</div>";
+  page += "<div class='muted' style='margin-top:10px;'>Not: Ayarlardan 'Bypass authentication for clients on localhost' seçeneğini açtıysanız kullanıcı adı ve şifre boş bırakılabilir.</div>";
+  page += "</div></div>";
+
 
   page += "<div class='panel' data-panel='tabs'>";
   page += "<button type='button' class='panel-toggle' "
@@ -798,6 +824,10 @@ static void handleSave() {
       server.hasArg("nickname") ? server.arg("nickname") : buddyNickname;
   String newCalUrl =
       server.hasArg("calUrl") ? server.arg("calUrl") : calendarUrl;
+  String newQbUrl = server.hasArg("qbUrl") ? server.arg("qbUrl") : qbUrl;
+  String newQbUser = server.hasArg("qbUser") ? server.arg("qbUser") : qbUser;
+  String newQbPass = server.hasArg("qbPass") ? server.arg("qbPass") : qbPass;
+
   newCalUrl.trim();
   String newSpotifyUrl =
       server.hasArg("spotifyUrl") ? server.arg("spotifyUrl") : spotifyUrl;
@@ -882,6 +912,10 @@ static void handleSave() {
   unitKey = newUnits;
   regionFormatKey = newRegion;
   flashModeEnabled = newFlashMode;
+  qbUrl = newQbUrl;
+  qbUser = newQbUser;
+  qbPass = newQbPass;
+
   for (int p = 0; p < 3; p++) {
     tabNames[p] = newTabNames[p];
     pageLayouts[p] = newLayouts[p];
@@ -915,6 +949,10 @@ static void handleSave() {
   prefs.putInt("w_goal", waterGoal);
   prefs.putString("steamKey", steamApiKey);
   prefs.putString("steamId", steamId);
+  prefs.putString("qbUrl", qbUrl);
+  prefs.putString("qbUser", qbUser);
+  prefs.putString("qbPass", qbPass);
+
   for (int p = 0; p < 3; p++) {
     prefs.putString(("t_name" + String(p)).c_str(), tabNames[p]);
     prefs.putInt(("t_lay" + String(p)).c_str(), (int)pageLayouts[p]);
@@ -936,6 +974,9 @@ static void handleSave() {
   lastSpotifyFetch = 0;
   lastGithubFetch = 0;
   lastSteamFetch = 0;
+  lastQbitFetch = 0;
+  qbSID = "";
+
 
   notesDirty = true;
   pageDirty = true;
