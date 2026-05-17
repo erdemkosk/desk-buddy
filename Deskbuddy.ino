@@ -4804,22 +4804,16 @@ void performOTAUpdate() {
   client.setInsecure(); // GitHub API doesn't require strict cert checking for public releases
 
   HTTPClient http;
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.begin(client, "https://api.github.com/repos/erdemkosk/desk-buddy/releases/latest");
   http.addHeader("User-Agent", "ESP32-Deskbuddy");
   int httpCode = http.GET();
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    if (error) {
-      tft.fillScreen(COL_BG);
-      tft.drawString("Veri Hatasi!", SCREEN_W / 2, SCREEN_H / 2, 2);
-      delay(2000);
-    } else {
-      String latestVer = doc["tag_name"] | "";
-      if (latestVer != "" && latestVer != FIRMWARE_VERSION) {
-        String downloadUrl = doc["assets"][0]["browser_download_url"] | "";
+    DynamicJsonDocument doc(4096);
+    deserializeJson(doc, payload);
+    String latestVer = doc["tag_name"] | "";
+    if (latestVer != "" && latestVer != FIRMWARE_VERSION) {
+      String downloadUrl = doc["assets"][0]["browser_download_url"] | "";
       if (downloadUrl != "") {
         tft.fillScreen(COL_BG);
         tft.drawString("Yeni Surum: " + latestVer, SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
@@ -4849,11 +4843,10 @@ void performOTAUpdate() {
       tft.drawString("Sistem Guncel!", SCREEN_W / 2, SCREEN_H / 2, 2);
       delay(2000);
     }
-    }
   } else {
     tft.fillScreen(COL_BG);
-    tft.drawString("Baglanti Hatasi!", SCREEN_W / 2, SCREEN_H / 2, 2);
-    delay(2000);
+    tft.drawString("Baglanti Hatasi! Kod: " + String(httpCode), SCREEN_W / 2, SCREEN_H / 2, 2);
+    delay(3000);
   }
   http.end();
   pageDirty = true;
