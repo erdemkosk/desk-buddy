@@ -41,11 +41,20 @@ jobs:
           find . -maxdepth 1 -type f -exec cp {} Deskbuddy/ \;
           arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs Deskbuddy/Deskbuddy.ino --output-dir build
 
+      - name: Extract Version
+        id: extract_version
+        run: |
+          # Deskbuddy_config.h icerisindeki FIRMWARE_VERSION degerini bul
+          VERSION=$(grep -oE 'FIRMWARE_VERSION = "([^"]+)"' Deskbuddy_config.h | cut -d'"' -f2)
+          if [ -z "$VERSION" ]; then VERSION="latest"; fi
+          echo "Bulunan versiyon: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: latest
-          name: En Guncel Surum (main)
+          tag_name: ${{ env.VERSION }}
+          name: Deskbuddy ${{ env.VERSION }}
           files: build/Deskbuddy.ino.bin
         env:
           GITHUB_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
