@@ -4817,8 +4817,22 @@ void performOTAUpdate() {
       if (downloadUrl != "") {
         tft.fillScreen(COL_BG);
         tft.drawString("Yeni Surum: " + latestVer, SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
-        tft.drawString("Indiriliyor...", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
+        tft.drawString("Basliyor...", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
         
+        httpUpdate.onProgress([](int cur, int total) {
+          static int lastPercent = -1;
+          int percent = (total > 0) ? (cur * 100) / total : 0;
+          if (percent != lastPercent && percent % 5 == 0) { // Her %5'te bir yenile (flicker'i onlemek icin)
+            lastPercent = percent;
+            tft.fillRect(0, SCREEN_H / 2, SCREEN_W, 80, COL_BG); // Sadece alt yariyi temizle
+            tft.drawString("Indiriliyor: %" + String(percent), SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
+            
+            int barWidth = (percent * (SCREEN_W - 60)) / 100;
+            tft.drawRect(30, SCREEN_H / 2 + 50, SCREEN_W - 60, 12, COL_TEXT);
+            tft.fillRect(32, SCREEN_H / 2 + 52, barWidth > 4 ? barWidth - 4 : 0, 8, COL_ACCENT);
+          }
+        });
+
         httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
         t_httpUpdate_return ret = httpUpdate.update(client, downloadUrl);
         
