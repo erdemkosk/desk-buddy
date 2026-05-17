@@ -39,7 +39,7 @@ jobs:
           mkdir -p Deskbuddy
           # Tüm dosyalari Deskbuddy klasorune tasi (build ve gizli dosyalar haric)
           find . -maxdepth 1 -type f -exec cp {} Deskbuddy/ \;
-          arduino-cli compile --fqbn esp32:esp32:esp32 Deskbuddy/Deskbuddy.ino --output-dir build
+          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs Deskbuddy/Deskbuddy.ino --output-dir build
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
