@@ -265,6 +265,7 @@ String octoUrl = "";
 String octoKey = "";
 String octoState = "Unknown";
 float octoProgress = 0;
+int octoPrintTimeLeft = 0;
 float octoToolTemp = 0;
 float octoBedTemp = 0;
 time_t lastOctoFetch = 0;
@@ -2763,6 +2764,7 @@ void fetchOctoprintData() {
       if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
         octoState = doc["state"].as<String>();
         octoProgress = doc["progress"]["completion"] | 0.0f;
+        octoPrintTimeLeft = doc["progress"]["printTimeLeft"] | 0;
         lastOctoFetch = time(nullptr);
         xSemaphoreGive(octoMutex);
       }
@@ -2771,6 +2773,7 @@ void fetchOctoprintData() {
     if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
       octoState = "Offline";
       octoProgress = 0;
+      octoPrintTimeLeft = 0;
       octoToolTemp = 0;
       octoBedTemp = 0;
       lastOctoFetch = time(nullptr); // Hata durumunu da bir sure hatirlayalim
@@ -2808,15 +2811,20 @@ void fetchOctoprintData() {
 void drawOctoprintHomeWidget(int x, int y, int w, int h, String &cache, bool force = false) {
   String state = "Offline";
   float prog = 0, tool = 0, bed = 0;
+  int eta = 0;
   if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
     state = octoState;
     prog = octoProgress;
+    eta = octoPrintTimeLeft;
     tool = octoToolTemp;
     bed = octoBedTemp;
     xSemaphoreGive(octoMutex);
   }
 
-  String combined = state + "|" + String(prog, 1) + "|" + String(tool, 1) + "|" + String(bed, 1);
+  unsigned long nowMs = millis();
+  bool showEta = (state == "Printing" && eta > 0) && ((nowMs / 3000) % 2 == 1);
+
+  String combined = state + "|" + String(prog, 1) + "|" + String(eta) + "|" + String(tool, 1) + "|" + String(bed, 1) + "|" + String(showEta);
   if (!force && combined == cache) return;
   cache = combined;
 
@@ -2847,17 +2855,21 @@ void drawOctoprintHomeWidget(int x, int y, int w, int h, String &cache, bool for
     sprSmall.drawString(state, 10, 28, 2);
   }
 
-  // Temps
-  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  // Temps & ETA (Alternating)
   sprSmall.setTextDatum(TL_DATUM);
-  sprSmall.drawString("T:", 10, 52, 1);
-  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  sprSmall.drawString(String(tool, 0) + "C", 25, 50, 2);
+  sprSmall.setTextColor(COL_ACCENT, COL_PANEL);
 
-  sprSmall.setTextColor(COL_DIM, COL_PANEL);
-  sprSmall.drawString("B:", w / 2 + 5, 52, 1);
-  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
-  sprSmall.drawString(String(bed, 0) + "C", w / 2 + 20, 50, 2);
+  if (showEta) {
+    int hrs = eta / 3600;
+    int mins = (eta % 3600) / 60;
+    String etaStr = "Kalan: ";
+    if (hrs > 0) etaStr += String(hrs) + "s ";
+    etaStr += String(mins) + "d";
+    sprSmall.drawString(etaStr, 10, h - 12, 1);
+  } else {
+    String tempStr = "T:" + String(tool, 0) + "C  B:" + String(bed, 0) + "C";
+    sprSmall.drawString(tempStr, 10, h - 12, 1);
+  }
 
   pushSpriteAndDelete(sprSmall, x, y);
 }
