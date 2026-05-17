@@ -4849,7 +4849,7 @@ void performOTAUpdate() {
     delay(2000);
   }
   http.end();
-  forceFullDraw = true;
+  pageDirty = true;
 }
 
 void setup() {
