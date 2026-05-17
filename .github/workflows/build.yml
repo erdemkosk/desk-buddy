@@ -2,8 +2,8 @@ name: Build Deskbuddy Firmware
 
 on:
   push:
-    tags:
-      - 'v*' # Sadece v ile başlayan tagler atıldığında çalışır (Örn: v1.6.0)
+    branches:
+      - main # Ana dala (main) her kod eklendiginde / merge edildiginde calisir
 
 jobs:
   build:
@@ -37,6 +37,8 @@ jobs:
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: latest
+          name: En Guncel Surum (main)
           files: build/Deskbuddy.ino.bin
         env:
           GITHUB_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
