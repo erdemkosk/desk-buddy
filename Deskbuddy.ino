@@ -29,6 +29,7 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <HTTPUpdate.h>
 #include <XPT2046_Touchscreen.h>
 #include <math.h>
 #include <stdio.h>
@@ -2418,6 +2419,13 @@ static void drawTopBarWifiForgetIcon(TFT_eSPI &g, int cx, int cy, uint16_t fg) {
   g.drawFastVLine(cx + 2, yBinTop + 2, 5, fg);
 }
 
+static void drawTopBarUpdateIcon(TFT_eSPI &g, int cx, int cy, uint16_t fg) {
+  g.drawCircle(cx, cy + 1, 5, fg);
+  g.drawCircle(cx, cy + 1, 4, fg);
+  g.fillRect(cx - 2, cy - 5, 5, 5, COL_PANEL); // cut top part
+  g.fillTriangle(cx - 3, cy - 4, cx + 3, cy - 4, cx, cy, fg); // arrow head
+}
+
 static void performWifiForgetAndRestart() {
   prefs.remove("wifiSsid");
   prefs.remove("wifiPass");
@@ -2532,9 +2540,14 @@ void drawTopBar(const String &title) {
 
   const int bs = TOPBAR_BTN_SZ;
   const int by = (TOPBAR_H - bs) / 2;
+  const int bxUpdate = topBarUpdateBtnX();
   const int bxWifi = topBarWifiForgetBtnX();
   const int bxDim = topBarDimBtnX();
   const int bxMoon = topBarMoonBtnX();
+
+  tft.fillRoundRect(bxUpdate, by, bs, bs, 7, COL_PANEL);
+  tft.drawRoundRect(bxUpdate, by, bs, bs, 7, COL_ACCENT);
+  drawTopBarUpdateIcon(tft, bxUpdate + bs / 2, by + bs / 2, COL_TEXT);
 
   uint16_t bgWF = COL_PANEL;
   uint16_t fgWF = COL_TEXT;
@@ -4781,6 +4794,64 @@ void setWifiEnabled(bool enabled) {
   pageDirty = true;
 }
 
+void performOTAUpdate() {
+  tft.fillScreen(COL_BG);
+  tft.setTextColor(COL_TEXT, COL_BG);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("Guncelleme Araniyor...", SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
+
+  WiFiClientSecure client;
+  client.setInsecure(); // GitHub API doesn't require strict cert checking for public releases
+
+  HTTPClient http;
+  http.begin(client, "https://api.github.com/repos/erdemkosk/desk-buddy/releases/latest");
+  http.addHeader("User-Agent", "ESP32-Deskbuddy");
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    DynamicJsonDocument doc(4096);
+    deserializeJson(doc, payload);
+    String latestVer = doc["tag_name"] | "";
+    if (latestVer != "" && latestVer != FIRMWARE_VERSION) {
+      String downloadUrl = doc["assets"][0]["browser_download_url"] | "";
+      if (downloadUrl != "") {
+        tft.fillScreen(COL_BG);
+        tft.drawString("Yeni Surum: " + latestVer, SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
+        tft.drawString("Indiriliyor...", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
+        
+        httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+        t_httpUpdate_return ret = httpUpdate.update(client, downloadUrl);
+        
+        tft.fillScreen(COL_BG);
+        switch (ret) {
+          case HTTP_UPDATE_FAILED:
+            tft.drawString("Hata!", SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
+            tft.drawString(httpUpdate.getLastErrorString(), SCREEN_W / 2, SCREEN_H / 2 + 10, 1);
+            delay(3000);
+            break;
+          case HTTP_UPDATE_NO_UPDATES:
+            break;
+          case HTTP_UPDATE_OK:
+            tft.drawString("Basarili! Yeniden basliyor...", SCREEN_W / 2, SCREEN_H / 2, 2);
+            delay(1000);
+            ESP.restart();
+            break;
+        }
+      }
+    } else {
+      tft.fillScreen(COL_BG);
+      tft.drawString("Sistem Guncel!", SCREEN_W / 2, SCREEN_H / 2, 2);
+      delay(2000);
+    }
+  } else {
+    tft.fillScreen(COL_BG);
+    tft.drawString("Baglanti Hatasi!", SCREEN_W / 2, SCREEN_H / 2, 2);
+    delay(2000);
+  }
+  http.end();
+  forceFullDraw = true;
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -5005,6 +5076,7 @@ void loop() {
       return;
     }
 
+    const int bxUpdate = topBarUpdateBtnX();
     const int bxWifi = topBarWifiForgetBtnX();
     const int bxDim = topBarDimBtnX();
     const int bxMoon = topBarMoonBtnX();
@@ -5014,6 +5086,8 @@ void loop() {
         enterManualSleepFull();
       else if (tx >= bxDim && tx < bxDim + bs)
         toggleManualDimBar();
+      else if (tx >= bxUpdate && tx < bxUpdate + bs)
+        performOTAUpdate();
       else if (tx >= bxWifi && tx < bxWifi + bs)
         openWifiForgetConfirm();
     } else {
