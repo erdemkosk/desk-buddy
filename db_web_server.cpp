@@ -525,9 +525,19 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
      simCenter.className = 'sim-center layout-' + val;
      
      const isGrid = (val === '0' || val === '3');
-     document.getElementById('grid_p' + currentTabIdx).style.display = isGrid ? 'grid' : 'none';
+     // Hide all grids, show current
+     for(let p=0; p<3; p++) {
+         const gridArea = document.getElementById('grid_p' + p);
+         if(gridArea) gridArea.style.display = 'none';
+     }
+     const currentGridArea = document.getElementById('grid_p' + currentTabIdx);
+     if(currentGridArea) currentGridArea.style.display = isGrid ? 'grid' : 'none';
      
      if (isGrid) {
+       if(!document.getElementById('sim-clock')) {
+          simCenter.innerHTML = '<div class="sim-clock" id="sim-clock">14:30</div><div class="sim-widget" id="sim-w0">Slot 1</div><div class="sim-widget" id="sim-w1">Slot 2</div><div class="sim-widget" id="sim-w2">Slot 3</div><div class="sim-widget" id="sim-w3">Slot 4</div><div class="sim-widget" id="sim-w4" style="display:none">Slot 5</div><div class="sim-widget" id="sim-w5" style="display:none">Slot 6</div>';
+       }
+       
        document.getElementById('p' + currentTabIdx + 'slot4_c').style.display = (val === '3') ? 'block' : 'none';
        document.getElementById('p' + currentTabIdx + 'slot5_c').style.display = (val === '3') ? 'block' : 'none';
        
@@ -542,13 +552,9 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
           }
        }
      } else if (val === '1') {
-       document.getElementById('sim-clock').style.display = 'none';
-       for(let i=0; i<6; i++) document.getElementById('sim-w'+i).style.display = 'none';
-       simCenter.innerHTML = '<div class="sim-clock" style="font-size:20px; color:#a0aec0">Hava Durumu<br>Tam Ekran</div>';
+       simCenter.innerHTML = '<div class="sim-clock" style="font-size:20px; color:#a0aec0; text-align:center;">Hava Durumu<br>Tam Ekran</div>';
      } else if (val === '2') {
-       document.getElementById('sim-clock').style.display = 'none';
-       for(let i=0; i<6; i++) document.getElementById('sim-w'+i).style.display = 'none';
-       simCenter.innerHTML = '<div class="sim-clock" style="font-size:20px; color:#a0aec0">Notlar<br>Tam Ekran</div>';
+       simCenter.innerHTML = '<div class="sim-clock" style="font-size:20px; color:#a0aec0; text-align:center;">Notlar<br>Tam Ekran</div>';
      }
 
      // Sync names
@@ -572,8 +578,19 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
   }
   
   // Tab sync for preview (simulating bottom nav click)
-  const layoutTabBtns = document.querySelectorAll('#tab-layout h3');
-  // Just show layout for Tab 1 by default
+  for(let p=0; p<3; p++){
+      const navItem = document.getElementById('sim-nav-'+p);
+      if(navItem) {
+          navItem.style.cursor = 'pointer';
+          navItem.addEventListener('click', () => {
+              for(let k=0; k<3; k++) document.getElementById('sim-nav-'+k).classList.remove('active');
+              navItem.classList.add('active');
+              currentTabIdx = p;
+              updateLayout();
+          });
+      }
+  }
+
   updateColors();
   updateLayout();
 
