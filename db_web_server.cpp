@@ -444,11 +444,13 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
     <!-- API Tab -->
     <div class="panel" id="tab-api">
       <h2>API ve Entegrasyonlar</h2>
+      <p style="margin-bottom: 20px; font-size: 14px; color: #9ca3af;">
+        Tüm bu bağlantıların (Spotify, Steam, Takvim vb.) nasıl yapılacağını adım adım öğrenmek için 
+        <a href="https://github.com/erdemkosk/desk-buddy/blob/main/ENTEGRASYON_REHBERI.md" target="_blank" style="color: #60a5fa; text-decoration: underline;">Deskbuddy Entegrasyon Rehberi</a>'ne tıklayın.
+      </p>
       
       <label class="label">Google Takvim URL (Apps Script)</label>
       <input type="text" name="calUrl" value=")=====" + htmlEscape(calendarUrl) + R"=====(">
-      <span class="muted">Rehber için SETUP_GUIDE.md dosyasına bakın.</span>
-
       <label class="label" style="margin-top:10px">Spotify Proxy URL (Apps Script)</label>
       <input type="text" name="spotifyUrl" value=")=====" + htmlEscape(spotifyUrl) + R"=====(">
       
