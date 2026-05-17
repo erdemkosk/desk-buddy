@@ -26,13 +26,20 @@ jobs:
           arduino-cli lib install "TFT_eSPI"
           arduino-cli lib install "XPT2046_Touchscreen"
 
-      # NOT: Eger kisisellestirilmis TFT_eSPI ayarlarin (User_Setup.h) varsa,
-      # bu asamada o dosyayi kutuphaneye kopyalayan bir adim eklemen gerekebilir.
+      - name: Configure TFT_eSPI
+        run: |
+          if [ -f "User_Setup.h" ]; then
+            cp User_Setup.h ~/Arduino/libraries/TFT_eSPI/User_Setup.h
+            echo "Kisisel User_Setup.h kopyalandi."
+          fi
 
       - name: Compile Sketch
         run: |
-          # FQBN ayari standart ESP32 Dev Module (esp32:esp32:esp32) olarak ayarlandi.
-          arduino-cli compile --fqbn esp32:esp32:esp32 Deskbuddy.ino --output-dir build
+          mkdir -p build
+          mkdir -p Deskbuddy
+          # Tüm dosyalari Deskbuddy klasorune tasi (build ve gizli dosyalar haric)
+          find . -maxdepth 1 -type f -exec cp {} Deskbuddy/ \;
+          arduino-cli compile --fqbn esp32:esp32:esp32 Deskbuddy/Deskbuddy.ino --output-dir build
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
