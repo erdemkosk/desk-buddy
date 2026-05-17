@@ -6,6 +6,7 @@
 #include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <Update.h>
 #include <math.h>
 
 #include "Deskbuddy_config.h"
@@ -760,9 +761,34 @@ static void handleRoot() {
   }
   page += "</div></div>";
 
-  page += "</div><div class='stack'>";
+  page += "</div><div class='stack' style='position: sticky; top: 20px;'>";
+  
+  // OTA Button
+  page += "<div class='panel' style='background: #1e293b; border-color: #3b82f6; text-align: center;'>";
+  page += "<h2 style='margin-top:0;'>Firmware Update (OTA)</h2>";
+  page += "<p style='font-size:13px; color:#cbd5e1; margin-bottom: 16px;'>Cihazı kablosuz güncelleyin.</p>";
+  page += "<a href='/update' style='display:inline-block; background:#3b82f6; color:#0f172a; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; width: 100%; box-sizing: border-box;'>Güncelleme Sayfası</a>";
+  page += "</div>";
 
-  page += "<button type='submit'>Save to Deskbuddy</button>";
+  // Live Preview Box
+  page += "<div class='panel' style='padding: 15px;'>";
+  page += "<h2 style='margin-top:0;'>Canlı Önizleme</h2>";
+  page += "<p style='font-size: 12px; color: #94a3b8;'>Renk seçimlerinin tahmini görünümü.</p>";
+  page += "<div id='live-preview' style='width: 100%; aspect-ratio: 4/3; border-radius: 12px; border: 2px solid #334155; position: relative; overflow: hidden; margin: 0 auto; transition: background 0.3s;'>";
+  // Top bar
+  page += "<div style='height: 12%; background: rgba(0,0,0,0.3); border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; padding: 0 10px;'>";
+  page += "<span style='font-size: 10px; font-weight: bold; color: #fff;'>Deskbuddy</span>";
+  page += "</div>";
+  // Content area
+  page += "<div style='padding: 5%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; height: 75%; box-sizing: border-box;'>";
+  page += "<div style='background: rgba(0,0,0,0.4); border-radius: 8px; border: 1px solid var(--lp-accent, #38bdf8); grid-column: 1 / -1; height: 100%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: bold;'>12:34</div>";
+  page += "<div style='background: rgba(0,0,0,0.4); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); height: 100%;'></div>";
+  page += "<div style='background: rgba(0,0,0,0.4); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); height: 100%;'></div>";
+  page += "</div>";
+  page += "</div>";
+  page += "</div>";
+
+  page += "<button type='submit' style='width: 100%; padding: 14px; font-size: 16px; margin-top: 0;'>Save to Deskbuddy</button>";
   page += "</div></div></form>";
   page += "<script>function updateLayout(val, p){"
           "var g=document.getElementById('grid_p'+p);"
@@ -795,6 +821,17 @@ static void handleRoot() {
           "value]){valueEl.textContent=colorNames[input.name][input.value];}";
   page += "});";
   page += "});";
+  page += "var bgColors = {slate:'#0f172a', deep:'#000000', nordic:'#2e3440', forest:'#14532d', coffee:'#3e2723', soft:'#1c1c1e', midnight:'#191970', graphite:'#2c2c2c', garnet:'#4a0404', ochre:'#795548'};";
+  page += "var accentColors = {standard:'#38bdf8', ice:'#e0f2fe', white:'#ffffff', cyan:'#06b6d4', mint:'#10b981', green:'#22c55e', blue:'#2563eb', purple:'#8b5cf6', pink:'#ec4899', orange:'#f97316', amber:'#fbbf24', red:'#ef4444'};";
+  page += "function updateLivePreview() {";
+  page += "  var bgEl = document.querySelector('input[name=\"bg\"]:checked');";
+  page += "  var accentEl = document.querySelector('input[name=\"accent\"]:checked');";
+  page += "  var lp = document.getElementById('live-preview');";
+  page += "  if(lp && bgEl && bgColors[bgEl.value]) lp.style.background = bgColors[bgEl.value];";
+  page += "  if(lp && accentEl && accentColors[accentEl.value]) lp.style.setProperty('--lp-accent', accentColors[accentEl.value]);";
+  page += "}";
+  page += "document.querySelectorAll('input[name=\"bg\"], input[name=\"accent\"]').forEach(function(el){ el.addEventListener('change', updateLivePreview); });";
+  page += "updateLivePreview();";
   page += "function readPanelState(){try{return "
           "JSON.parse(localStorage.getItem(panelStorageKey)||'{}');}catch(e){"
           "return {};}}";
@@ -1045,5 +1082,76 @@ static void handleSave() {
 void setupWebServer() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save", HTTP_POST, handleSave);
+  
+  // OTA Routes
+  server.on("/update", HTTP_GET, []() {
+    String html = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Deskbuddy OTA Update</title>
+  <style>
+    body { background: #0f172a; color: #f8fafc; font-family: system-ui, sans-serif; text-align: center; padding: 50px 20px; }
+    .box { max-width: 500px; margin: 0 auto; background: #1e293b; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #334155; }
+    h1 { margin-top: 0; color: #38bdf8; }
+    p { color: #94a3b8; font-size: 15px; }
+    input[type="file"] { margin: 20px 0; padding: 15px; background: #0f172a; border-radius: 8px; border: 1px dashed #475569; width: 100%; box-sizing: border-box; color: #fff; cursor: pointer; }
+    button { padding: 14px 24px; background: #38bdf8; color: #000; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; width: 100%; transition: opacity 0.2s; margin-bottom: 10px; }
+    button:hover { opacity: 0.9; }
+    .back { display: inline-block; margin-top: 20px; color: #38bdf8; text-decoration: none; font-weight: bold; }
+    .back:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>Firmware Güncelleme</h1>
+    <p>Arduino'da derlediğiniz <b>Deskbuddy.ino.bin</b> dosyasını buraya yükleyin. Cihazınız Wi-Fi üzerinden otomatik güncellenecek.</p>
+    <form method="POST" action="/update" enctype="multipart/form-data" id="upload_form">
+      <input type="file" name="update" accept=".bin" required>
+      <button type="submit" id="btn">Güncellemeyi Başlat</button>
+    </form>
+    <a href="/" class="back">&larr; Ayarlara Dön</a>
+  </div>
+  <script>
+    document.getElementById('upload_form').onsubmit = function() {
+      var btn = document.getElementById('btn');
+      btn.innerText = "Yükleniyor... Lütfen bekleyin.";
+      btn.style.opacity = "0.6";
+      btn.style.cursor = "not-allowed";
+    };
+  </script>
+</body>
+</html>
+)rawliteral";
+    server.send(200, "text/html", html);
+  });
+
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "GÜNCELLEME BAŞARISIZ! Cihaz yeniden başlatılıyor..." : "GÜNCELLEME BAŞARILI! Cihaz yeniden başlatılıyor...");
+    delay(1000);
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("Update Start: %s\n", upload.filename.c_str());
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) {
+        Serial.printf("Update Success: %u bytes\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+    }
+  });
+
   server.begin();
 }
