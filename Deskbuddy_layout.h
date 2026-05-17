@@ -14,6 +14,7 @@ constexpr int TOPBAR_BTN_MR = 5;
 inline int topBarMoonBtnX() { return SCREEN_W - TOPBAR_BTN_SZ - TOPBAR_BTN_MR; }
 inline int topBarDimBtnX() { return topBarMoonBtnX() - TOPBAR_BTN_SZ - TOPBAR_BTN_GAP; }
 inline int topBarWifiForgetBtnX() { return topBarDimBtnX() - TOPBAR_BTN_SZ - TOPBAR_BTN_GAP; }
+inline int topBarUpdateBtnX() { return topBarWifiForgetBtnX() - TOPBAR_BTN_SZ - TOPBAR_BTN_GAP; }
 
 constexpr int HOME_GRID_Y1 = 120;
 constexpr int HOME_GRID_Y2 = 198;
