@@ -5129,14 +5129,28 @@ void performOTAUpdate() {
       httpUpdate.onProgress([](int cur, int total) {
         static unsigned long lastDrawMs = 0;
         static int lastPercent = -1;
+        static int lastKB = -1;
         
         int percent = (total > 0) ? (cur * 100) / total : 0;
-        if (percent != lastPercent) {
-          lastPercent = percent;
-          
+        int curKB = cur / 1024;
+        
+        bool shouldDraw = false;
+        if (total > 0) {
+          if (percent != lastPercent) {
+            lastPercent = percent;
+            shouldDraw = true;
+          }
+        } else {
+          if (curKB != lastKB) {
+            lastKB = curKB;
+            shouldDraw = true;
+          }
+        }
+        
+        if (shouldDraw) {
           // Limit screen redrawing to at most once every 300ms to prevent TCP congestion and connection freezing
           unsigned long nowMs = millis();
-          if (nowMs - lastDrawMs >= 300 || percent == 100) {
+          if (nowMs - lastDrawMs >= 300 || (total > 0 && percent == 100)) {
             lastDrawMs = nowMs;
             
             tft.fillRect(0, SCREEN_H / 2, SCREEN_W, 80, COL_BG); // Clear progress area
@@ -5147,7 +5161,7 @@ void performOTAUpdate() {
               tft.drawRect(30, SCREEN_H / 2 + 50, SCREEN_W - 60, 12, COL_TEXT);
               tft.fillRect(32, SCREEN_H / 2 + 52, barWidth > 4 ? barWidth - 4 : 0, 8, COL_ACCENT);
             } else {
-              tft.drawString("Indiriliyor... (" + String(cur / 1024) + " KB)", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
+              tft.drawString("Indiriliyor: " + String(curKB) + " KB", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
             }
           }
         }
