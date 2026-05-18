@@ -5137,9 +5137,36 @@ void performOTAUpdate() {
       client.setTimeout(120000); // Şimdi büyük binary indirme işlemi için timeout'u 120 saniyeye yükselt
       tft.fillScreen(COL_BG);
       tft.drawString("Yeni Surum: " + latestVer, SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
-      tft.drawString("Indiriliyor...", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
+      tft.drawString("Basliyor...", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
+      
+      httpUpdate.onProgress([](int cur, int total) {
+        static unsigned long lastDrawMs = 0;
+        static int lastPercent = -1;
+        
+        int percent = (total > 0) ? (cur * 100) / total : 0;
+        if (percent != lastPercent) {
+          lastPercent = percent;
+          
+          // Limit screen redrawing to at most once every 300ms to prevent TCP congestion and connection freezing
+          unsigned long nowMs = millis();
+          if (nowMs - lastDrawMs >= 300 || percent == 100) {
+            lastDrawMs = nowMs;
+            
+            tft.fillRect(0, SCREEN_H / 2, SCREEN_W, 80, COL_BG); // Clear progress area
+            if (total > 0) {
+              tft.drawString("Indiriliyor: %" + String(percent), SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
+              
+              int barWidth = (percent * (SCREEN_W - 60)) / 100;
+              tft.drawRect(30, SCREEN_H / 2 + 50, SCREEN_W - 60, 12, COL_TEXT);
+              tft.fillRect(32, SCREEN_H / 2 + 52, barWidth > 4 ? barWidth - 4 : 0, 8, COL_ACCENT);
+            } else {
+              tft.drawString("Indiriliyor... (" + String(cur / 1024) + " KB)", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
+            }
+          }
+        }
+      });
 
-      httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+      httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
       t_httpUpdate_return ret = httpUpdate.update(client, downloadUrl);
         
         tft.fillScreen(COL_BG);
