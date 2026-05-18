@@ -5150,15 +5150,13 @@ void performOTAUpdate() {
             tft.drawString("Basarili! Yeniden basliyor...", SCREEN_W / 2, SCREEN_H / 2, 2);
             delay(1000);
             ESP.restart();
-            break;
         }
+      } else {
+        tft.fillScreen(COL_BG);
+        tft.drawString("Sistem Guncel!", SCREEN_W / 2, SCREEN_H / 2, 2);
+        delay(2000);
       }
     } else {
-      tft.fillScreen(COL_BG);
-      tft.drawString("Sistem Guncel!", SCREEN_W / 2, SCREEN_H / 2, 2);
-      delay(2000);
-    }
-  } else {
     tft.fillScreen(COL_BG);
     tft.drawString("Baglanti Hatasi! Kod: " + String(httpCode), SCREEN_W / 2, SCREEN_H / 2, 2);
     delay(3000);
