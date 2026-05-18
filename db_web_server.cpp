@@ -181,7 +181,7 @@ static String asciiFoldTurkishUtf8ToAscii(const String &in) {
 
 static void handleRoot() {
   String page = "";
-  page.reserve(48000);
+  page.reserve(65000);
 
   String accent = prefs.getString("accent", "cyan");
   String bg = prefs.getString("bg", "slate");
