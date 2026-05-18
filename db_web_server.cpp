@@ -665,6 +665,9 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 </script>
 </body></html>)=====";
 
+  server.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Expires", "-1");
   server.send(200, "text/html; charset=utf-8", page);
 }
 
