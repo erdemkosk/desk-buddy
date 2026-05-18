@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <WebServer.h>
+#include <Update.h>
 #include <WiFi.h>
 #include <math.h>
 
@@ -28,6 +29,7 @@ int sanitizeTimerMinutes(int value);
 
 extern WebServer server;
 extern Preferences prefs;
+extern volatile bool otaUpdateActive;
 
 extern String notesText;
 extern String locationName;
@@ -248,6 +250,13 @@ input[type=text].ha-input { font-size: 11px; padding: 6px; margin-bottom: 0px; w
 input[type=text].ha-input.lbl { margin-bottom: 3px; }
 .muted { font-size: 12px; color: #64748b; margin-top: -10px; margin-bottom: 16px; display: block; line-height: 1.4;}
 hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
+.download-link-btn { display: inline-block; background: #16a34a; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 14px; transition: all 0.2s; border: 1px solid rgba(255,255,255,0.1); }
+.download-link-btn:hover { background: #15803d; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2); }
+#drop-zone { border: 2px dashed #475569; border-radius: 12px; padding: 32px 20px; text-align: center; background: #0f172a; cursor: pointer; transition: all 0.2s; position: relative; margin-top: 10px; }
+#drop-zone:hover { border-color: var(--accent); background: #1e293b; box-shadow: 0 4px 20px rgba(6, 182, 212, 0.1); }
+#drop-zone.dragover { border-color: var(--accent); background: rgba(6, 182, 212, 0.15); }
+.update-status-ok { background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; }
+.update-status-fail { background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
 @media(max-width: 800px) {
   .app-container { flex-direction: column; align-items: center; }
   .preview-pane { position: relative; top: 0; width: 100%; max-width: 300px; }
@@ -300,6 +309,7 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
     <button type="button" class="tab-btn" data-tab="tab-notes">Notlar</button>
     <button type="button" class="tab-btn" data-tab="tab-settings">Genel Ayarlar</button>
     <button type="button" class="tab-btn" data-tab="tab-api">Bağlantılar (API)</button>
+    <button type="button" class="tab-btn" data-tab="tab-update">Güncelleme</button>
     <button type="submit" class="submit-btn">Cihaza Kaydet</button>
   </div>
 
@@ -503,6 +513,42 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
         <div style="grid-column: 1/-1;"><label class="label">Varsayılan Entity ID (OctoPrint Uzun Basma - Örn: switch.evde_3d)</label><input type="text" name="haEntityId" value=")=====" + htmlEscape(haEntityId) + R"=====("></div>
       </div>
 
+    </div>
+
+    <!-- Update Tab -->
+    <div class="panel" id="tab-update">
+      <h2>Yerel Yazılım Güncelleme (OTA)</h2>
+      <p style="margin-bottom: 20px; font-size: 14px; color: #9ca3af;">
+        Deskbuddy yazılımını bilgisayarınızdan seçerek doğrudan güncelleyin. En son derlenmiş binary dosyasını indirmek için aşağıdaki butona tıklayın, ardından indirilen <b>Deskbuddy.ino.bin</b> dosyasını aşağıdaki kutuya sürükleyip bırakın veya seçin.
+      </p>
+      
+      <div style="margin-bottom: 24px; text-align: center;">
+        <a href="https://github.com/erdemkosk/desk-buddy/releases" target="_blank" class="download-link-btn">
+          📥 En Son Sürümü İndir (GitHub Releases)
+        </a>
+      </div>
+
+      <hr>
+
+      <div id="drop-zone">
+        <div id="drop-text" style="color: #9ca3af; font-size: 14px; line-height: 1.6;">
+          <span style="font-size: 32px; display: block; margin-bottom: 12px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));">💾</span>
+          <b>Deskbuddy.ino.bin</b> dosyasını sürükleyin veya <b>Dosya Seçmek İçin Tıklayın</b>
+        </div>
+        <input type="file" id="update-file" accept=".bin" style="display: none;">
+        
+        <div id="progress-container" style="display: none; margin-top: 16px;">
+          <div style="display: flex; justify-content: space-between; font-size: 12px; color: #9ca3af; margin-bottom: 6px;">
+            <span id="upload-status" style="font-weight: bold; color: var(--accent);">Yazılım Yükleniyor...</span>
+            <span id="upload-percent" style="font-weight: bold;">0%</span>
+          </div>
+          <div style="width: 100%; height: 8px; background: #374151; border-radius: 4px; overflow: hidden; border: 1px solid rgba(255,255,255,0.05);">
+            <div id="upload-bar" style="width: 0%; height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.1s;"></div>
+          </div>
+        </div>
+      </div>
+      
+      <div id="update-status-msg" style="display: none; margin-top: 16px; padding: 14px; border-radius: 8px; font-size: 13px; text-align: center; font-weight: 600; line-height: 1.4;"></div>
     </div>
 
   </div>
@@ -834,6 +880,102 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
   setTimeout(updateLayout, 100);
   setTimeout(updateLayout, 500);
 
+  // Local Web Update Drag and Drop upload
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('update-file');
+  const progressContainer = document.getElementById('progress-container');
+  const uploadBar = document.getElementById('upload-bar');
+  const uploadPercent = document.getElementById('upload-percent');
+  const uploadStatus = document.getElementById('upload-status');
+  const statusMsg = document.getElementById('update-status-msg');
+  const dropText = document.getElementById('drop-text');
+
+  if (dropZone && fileInput) {
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, () => {
+        dropZone.classList.remove('dragover');
+      });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.files.length) {
+        handleFileUpload(e.dataTransfer.files[0]);
+      }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (fileInput.files.length) {
+        handleFileUpload(fileInput.files[0]);
+      }
+    });
+  }
+
+  function handleFileUpload(file) {
+    if (!file.name.endsWith('.bin')) {
+      showStatus('Hata: Sadece .bin uzantılı yazılım dosyaları yüklenebilir!', false);
+      return;
+    }
+
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+    formData.append('update', file);
+
+    dropText.style.display = 'none';
+    progressContainer.style.display = 'block';
+    statusMsg.style.display = 'none';
+    uploadBar.style.width = '0%';
+    uploadPercent.innerText = '0%';
+    uploadStatus.innerText = 'Yazılım Yükleniyor...';
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) {
+        const percent = Math.round((e.loaded / e.total) * 100);
+        uploadBar.style.width = percent + '%';
+        uploadPercent.innerText = percent + '%';
+        if (percent === 100) {
+          uploadStatus.innerText = 'Flaş Belleğe Yazılıyor...';
+        }
+      }
+    });
+
+    xhr.onload = () => {
+      if (xhr.status === 200 && xhr.responseText.trim() === 'OK') {
+        showStatus('Başarılı! Yazılım yüklendi. Cihaz yeniden başlatılıyor...', true);
+        progressContainer.style.display = 'none';
+        setTimeout(() => {
+          window.location.reload();
+        }, 4000);
+      } else {
+        showStatus('Yükleme Başarısız! Hata Kodu: ' + xhr.status + ' - ' + xhr.responseText, false);
+        dropText.style.display = 'block';
+        progressContainer.style.display = 'none';
+      }
+    };
+
+    xhr.onerror = () => {
+      showStatus('Bağlantı Hatası! Yükleme kesildi.', false);
+      dropText.style.display = 'block';
+      progressContainer.style.display = 'none';
+    };
+
+    xhr.open('POST', '/update', true);
+    xhr.send(formData);
+  }
+
+  function showStatus(msg, isSuccess) {
+    statusMsg.innerText = msg;
+    statusMsg.className = isSuccess ? 'update-status-ok' : 'update-status-fail';
+    statusMsg.style.display = 'block';
+  }
+
 </script>
 </body></html>)=====";
 
@@ -1094,5 +1236,34 @@ static void handleSave() {
 void setupWebServer() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save", HTTP_POST, handleSave);
+  
+  // Local web upload OTA handler
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+    delay(1000);
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("Local OTA Update: %s\n", upload.filename.c_str());
+      otaUpdateActive = true; // Suspend background tasks to prevent TLS/heap deadlocks
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { // start with max available size
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) { // true to set the size to the current progress
+        Serial.printf("Local OTA Success: %u bytes. Rebooting...\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+      otaUpdateActive = false;
+    }
+  });
+
   server.begin();
 }
