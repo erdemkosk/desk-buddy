@@ -319,7 +319,7 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
       appendHomeWidgetOptions(page, homeWidgetKey(pageWidgetSlots[p][i]));
       page += "</select>";
       
-      String isHaSelected = (homeWidgetKey(pageWidgetSlots[p][i]) == String("ha")) ? "block" : "none";
+      String isHaSelected = (String(homeWidgetKey(pageWidgetSlots[p][i])) == "ha") ? "block" : "none";
       page += "<div id='p" + String(p) + "slot" + String(i) + "_ha' style='display:" + isHaSelected + "; margin-top:5px;'>";
       page += "<input type='text' name='t" + String(p) + "slot" + String(i) + "_lbl' placeholder='Buton Etiketi (Örn: Lamba)' value='" + htmlEscape(pageHaLabels[p][i]) + "' style='font-size:11px; padding:4px; margin-bottom:2px; width:100%; box-sizing:border-box;'>";
       page += "<input type='text' name='t" + String(p) + "slot" + String(i) + "_ent' placeholder='Entity ID(ler)' value='" + htmlEscape(pageHaEntities[p][i]) + "' style='font-size:11px; padding:4px; width:100%; box-sizing:border-box;'>";
