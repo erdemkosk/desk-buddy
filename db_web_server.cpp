@@ -66,6 +66,10 @@ extern String octoUrl;
 extern String octoKey;
 extern time_t lastOctoFetch;
 
+extern String haUrl;
+extern String haToken;
+extern String haEntityId;
+
 
 
 
@@ -472,6 +476,13 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
         <div><label class="label">OctoPrint URL</label><input type="text" name="octoUrl" value=")=====" + htmlEscape(octoUrl) + R"=====("></div>
         <div><label class="label">OctoPrint API Key</label><input type="password" name="octoKey" value=")=====" + htmlEscape(octoKey) + R"=====("></div>
       </div>
+
+      <h3 style="color:#a0aec0; margin-top:20px; font-size:14px;">Home Assistant (OctoPrint Uzun Basma Toggle)</h3>
+      <div class="grid">
+        <div style="grid-column: 1/-1;"><label class="label">HA URL (Örn: http://192.168.1.50:8123)</label><input type="text" name="haUrl" value=")=====" + htmlEscape(haUrl) + R"=====("></div>
+        <div><label class="label">HA Token (Long-Lived)</label><input type="password" name="haToken" value=")=====" + htmlEscape(haToken) + R"=====("></div>
+        <div><label class="label">Entity ID (Örn: switch.evde_3d)</label><input type="text" name="haEntityId" value=")=====" + htmlEscape(haEntityId) + R"=====("></div>
+      </div>
     </div>
 
   </div>
@@ -620,7 +631,10 @@ static void handleSave() {
   String newQbPass = server.hasArg("qbPass") ? server.arg("qbPass") : qbPass;
   String newOctoUrl = server.hasArg("octoUrl") ? server.arg("octoUrl") : octoUrl;
   String newOctoKey = server.hasArg("octoKey") ? server.arg("octoKey") : octoKey;
-
+  
+  String newHaUrl = server.hasArg("haUrl") ? server.arg("haUrl") : haUrl;
+  String newHaToken = server.hasArg("haToken") ? server.arg("haToken") : haToken;
+  String newHaEntityId = server.hasArg("haEntityId") ? server.arg("haEntityId") : haEntityId;
 
   newCalUrl.trim();
   String newSpotifyUrl =
@@ -711,7 +725,9 @@ static void handleSave() {
   qbPass = newQbPass;
   octoUrl = newOctoUrl;
   octoKey = newOctoKey;
-
+  haUrl = newHaUrl;
+  haToken = newHaToken;
+  haEntityId = newHaEntityId;
 
   for (int p = 0; p < 3; p++) {
     tabNames[p] = newTabNames[p];
@@ -751,7 +767,9 @@ static void handleSave() {
   prefs.putString("qbPass", qbPass);
   prefs.putString("octoUrl", octoUrl);
   prefs.putString("octoKey", octoKey);
-
+  prefs.putString("haUrl", haUrl);
+  prefs.putString("haToken", haToken);
+  prefs.putString("haEntityId", haEntityId);
 
   for (int p = 0; p < 3; p++) {
     prefs.putString(("t_name" + String(p)).c_str(), tabNames[p]);

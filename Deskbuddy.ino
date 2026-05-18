@@ -170,6 +170,12 @@ static unsigned long waterTouchDownMs = 0;
 static int waterLongPressPage = -1;
 static int waterLongPressSlot = -1;
 
+// Octo HA Toggle long-press state
+static bool octoLongPressActive = false;
+static unsigned long octoTouchDownMs = 0;
+static int octoLongPressPage = -1;
+static int octoLongPressSlot = -1;
+
 Page currentPage = PAGE_TAB_0;
 Page lastDrawnPage = (Page)-1;
 
@@ -272,6 +278,11 @@ float octoBedTemp = 0;
 time_t lastOctoFetch = 0;
 const uint32_t OCTO_INTERVAL_SEC = 30;
 SemaphoreHandle_t octoMutex = NULL;
+
+// Home Assistant
+String haUrl = "http://192.168.1.50:8123";
+String haToken = "";
+String haEntityId = "switch.evde_3d";
 
 
 
@@ -1360,6 +1371,10 @@ void loadStoredSettings() {
   octoUrl = prefs.getString("octoUrl", "");
   octoKey = prefs.getString("octoKey", "");
 
+  haUrl = prefs.getString("haUrl", "http://192.168.1.50:8123");
+  haToken = prefs.getString("haToken", "");
+  haEntityId = prefs.getString("haEntityId", "switch.evde_3d");
+
 
 
   waterCount = prefs.getInt("w_cnt", 0);
@@ -1431,6 +1446,52 @@ void resetDataCaches() {
   lastFinanceFetch = 0;
   dataDirty = true;
   pageDirty = true;
+}
+
+void toggleHomeAssistant() {
+  if (WiFi.status() != WL_CONNECTED || haUrl.length() < 10 || haEntityId.length() < 3)
+    return;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  
+  String url = haUrl;
+  if (!url.endsWith("/")) url += "/";
+  url += "api/services/homeassistant/toggle";
+
+  HTTPClient http;
+  http.setTimeout(5000);
+  if (!http.begin(client, url)) {
+    Serial.println("[HA] begin failed");
+    return;
+  }
+  
+  if (haToken.length() > 5) {
+    http.addHeader("Authorization", "Bearer " + haToken);
+  }
+  http.addHeader("Content-Type", "application/json");
+
+  String body;
+  if (haEntityId.indexOf(',') != -1) {
+    body = "{\"entity_id\": [";
+    String temp = haEntityId;
+    temp.replace(" ", ""); // Remove spaces
+    int commaIdx;
+    while ((commaIdx = temp.indexOf(',')) != -1) {
+      String entity = temp.substring(0, commaIdx);
+      body += "\"" + entity + "\",";
+      temp = temp.substring(commaIdx + 1);
+    }
+    body += "\"" + temp + "\"]}";
+  } else {
+    body = "{\"entity_id\": \"" + haEntityId + "\"}";
+  }
+
+  int code = http.POST(body);
+  Serial.printf("[HA] POST body: %s\n", body.c_str());
+  Serial.printf("[HA] POST code: %d\n", code);
+  
+  http.end();
 }
 
 // =========================================================
@@ -5029,40 +5090,55 @@ void loop() {
 
   int tx = 0, ty = 0;
 
-  // Long-press detection for water widget reset
+  // Long-press detection for water widget reset and Octoprint HA toggle
   {
     int rx = 0, ry = 0;
     bool rawDown = readTouchXY(rx, ry);
     if (rawDown && !sleepOff && currentPage < 3 &&
         (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6)) {
       int pageIdx = (int)currentPage;
-      if (!waterLongPressActive) {
-        // Check if touching a water widget slot
+      if (!waterLongPressActive && !octoLongPressActive) {
+        // Check if touching a water or octoprint widget slot
         for (int s = 0; s < HOME_SLOT_COUNT; s++) {
-          if (pageWidgetSlots[pageIdx][s] != HOME_WIDGET_WATER) continue;
           int sx, sy, sw, sh;
           getHomeSlotRect(pageIdx, s, sx, sy, sw, sh);
           if (rx >= sx && rx < sx + sw && ry >= sy && ry < sy + sh) {
-            waterLongPressActive = true;
-            waterTouchDownMs = millis();
-            waterLongPressPage = pageIdx;
-            waterLongPressSlot = s;
-            break;
+            if (pageWidgetSlots[pageIdx][s] == HOME_WIDGET_WATER) {
+              waterLongPressActive = true;
+              waterTouchDownMs = millis();
+              waterLongPressPage = pageIdx;
+              waterLongPressSlot = s;
+              break;
+            } else if (pageWidgetSlots[pageIdx][s] == HOME_WIDGET_OCTOPRINT) {
+              octoLongPressActive = true;
+              octoTouchDownMs = millis();
+              octoLongPressPage = pageIdx;
+              octoLongPressSlot = s;
+              break;
+            }
           }
         }
       } else {
         // Already tracking a long press - check if held long enough
-        if (millis() - waterTouchDownMs >= 800) {
+        if (waterLongPressActive && millis() - waterTouchDownMs >= 800) {
           waterCount = 0;
           prefs.putInt("w_cnt", waterCount);
           if (waterLongPressPage >= 0 && waterLongPressSlot >= 0)
             cachePageWidgets[waterLongPressPage][waterLongPressSlot] = "";
           pageDirty = true;
           waterLongPressActive = false; // Reset so it only fires once
+        } else if (octoLongPressActive && millis() - octoTouchDownMs >= 800) {
+          toggleHomeAssistant();
+          // Optionally redraw widget cache if visual feedback is needed later
+          if (octoLongPressPage >= 0 && octoLongPressSlot >= 0)
+            cachePageWidgets[octoLongPressPage][octoLongPressSlot] = "";
+          pageDirty = true;
+          octoLongPressActive = false;
         }
       }
     } else {
       waterLongPressActive = false;
+      octoLongPressActive = false;
     }
   }
 
