@@ -234,6 +234,8 @@ textarea { min-height: 120px; resize: vertical; }
 .swatch.active { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
 .submit-btn { margin-top: 10px; background: var(--accent); color: #000; padding: 16px 20px; border-radius: 12px; font-weight: bold; border: none; cursor: pointer; width: 100%; font-size: 16px; transition: opacity 0.2s; }
 .submit-btn:hover { opacity: 0.9; }
+input[type=text].ha-input { font-size: 11px; padding: 6px; margin-bottom: 0px; width: 100%; box-sizing: border-box; }
+input[type=text].ha-input.lbl { margin-bottom: 3px; }
 .muted { font-size: 12px; color: #64748b; margin-top: -10px; margin-bottom: 16px; display: block; line-height: 1.4;}
 hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 @media(max-width: 800px) {
@@ -315,14 +317,12 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
     for (int i = 0; i < HOME_SLOT_COUNT; i++) {
       page += "<div id='p" + String(p) + "slot" + String(i) + "_c' style='display:" + String((pageLayouts[p] == LAYOUT_GRID && i >= 4) ? "none" : "block") + "'>";
       page += "<label class='label'>" + String(homeSlotLabel(i)) + "</label>";
-      page += "<select name='t" + String(p) + "slot" + String(i) + "' id='p" + String(p) + "slot" + String(i) + "' onchange='toggleHaFields(" + String(p) + "," + String(i) + ")'>";
-      appendHomeWidgetOptions(page, homeWidgetKey(pageWidgetSlots[p][i]));
-      page += "</select>";
+      page += "<select name='t" + String(p) + "slot" + String(i) + "' id='p" + String(p) + "slot" + String(i) + "' data-selected='" + homeWidgetKey(pageWidgetSlots[p][i]) + "' onchange='toggleHaFields(" + String(p) + "," + String(i) + ")'></select>";
       
       String isHaSelected = (String(homeWidgetKey(pageWidgetSlots[p][i])) == "ha") ? "block" : "none";
       page += "<div id='p" + String(p) + "slot" + String(i) + "_ha' style='display:" + isHaSelected + "; margin-top:5px;'>";
-      page += "<input type='text' name='t" + String(p) + "slot" + String(i) + "_lbl' placeholder='Buton Etiketi (Örn: Lamba)' value='" + htmlEscape(pageHaLabels[p][i]) + "' style='font-size:11px; padding:4px; margin-bottom:2px; width:100%; box-sizing:border-box;'>";
-      page += "<input type='text' name='t" + String(p) + "slot" + String(i) + "_ent' placeholder='Entity ID(ler)' value='" + htmlEscape(pageHaEntities[p][i]) + "' style='font-size:11px; padding:4px; width:100%; box-sizing:border-box;'>";
+      page += "<input type='text' class='ha-input lbl' name='t" + String(p) + "slot" + String(i) + "_lbl' placeholder='Buton Etiketi (Örn: Lamba)' value=\"" + htmlEscape(pageHaLabels[p][i]) + "\">";
+      page += "<input type='text' class='ha-input' name='t" + String(p) + "slot" + String(i) + "_ent' placeholder='Entity ID(ler)' value=\"" + htmlEscape(pageHaEntities[p][i]) + "\">";
       page += "</div>";
       page += "</div>";
     }
@@ -500,6 +500,43 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 </form>
 
 <script>
+  const WIDGET_OPTIONS = [
+    { key: "humidity", label: "Nem" },
+    { key: "timer", label: "Sayac" },
+    { key: "rain", label: "Yagmur" },
+    { key: "outdoor", label: "Sicaklik" },
+    { key: "kp", label: "Kp" },
+    { key: "uv", label: "UV" },
+    { key: "wind", label: "Ruzgar" },
+    { key: "sun", label: "Gunes" },
+    { key: "finance", label: "Doviz" },
+    { key: "buddy", label: "Buddy" },
+    { key: "notes", label: "Notlar" },
+    { key: "calendar", label: "Takvim" },
+    { key: "spotify", label: "Spotify" },
+    { key: "github", label: "GitHub" },
+    { key: "water", label: "Su" },
+    { key: "steam", label: "Steam" },
+    { key: "qbit", label: "qBittorrent" },
+    { key: "octo", label: "OctoPrint" },
+    { key: "ha", label: "HA Butonu" }
+  ];
+
+  // Populate all selects
+  document.querySelectorAll('select[id^="p"]').forEach(sel => {
+    const selectedKey = sel.getAttribute('data-selected');
+    WIDGET_OPTIONS.forEach(opt => {
+      const option = document.createElement('option');
+      option.value = opt.key;
+      option.text = opt.label;
+      if (opt.key === selectedKey) {
+        option.selected = true;
+        option.setAttribute('selected', 'selected');
+      }
+      sel.appendChild(option);
+    });
+  });
+
   function toggleHaFields(p, i) {
     var select = document.getElementById('p' + p + 'slot' + i);
     var div = document.getElementById('p' + p + 'slot' + i + '_ha');
@@ -807,46 +844,67 @@ static void handleSave() {
     timerPresetMin[i] = sanitizeTimerMinutes(nextValue);
   }
 
-  prefs.putString("notes", notesText);
-  prefs.putString("accent", newAccent);
-  prefs.putString("bg", newBg);
-  prefs.putString("text", newText);
-  prefs.putString("units", unitKey);
-  prefs.putString("region", regionFormatKey);
-  prefs.putString("nickname", buddyNickname);
-  prefs.putString("locname", locationName);
-  prefs.putFloat("lat", LAT);
-  prefs.putFloat("lng", LNG);
-  prefs.putInt("sleepMin", sleepIntervalMin);
-  prefs.putBool("flashMode", flashModeEnabled);
-  prefs.putString("calUrl", calendarUrl);
-  prefs.putString("spotifyUrl", spotifyUrl);
-  prefs.putString("githubUser", githubUser);
-  prefs.putInt("w_goal", waterGoal);
-  prefs.putString("steamKey", steamApiKey);
-  prefs.putString("steamId", steamId);
-  prefs.putString("qbUrl", qbUrl);
-  prefs.putString("qbUser", qbUser);
-  prefs.putString("qbPass", qbPass);
-  prefs.putString("octoUrl", octoUrl);
-  prefs.putString("octoKey", octoKey);
-  prefs.putString("haUrl", haUrl);
-  prefs.putString("haToken", haToken);
-  prefs.putString("haEntityId", haEntityId);
+  auto putStringIfChanged = [](const char* key, const String& newVal) {
+    if (prefs.getString(key, "") != newVal) {
+      prefs.putString(key, newVal);
+    }
+  };
+  auto putIntIfChanged = [](const char* key, int newVal) {
+    if (prefs.getInt(key, -9999) != newVal) {
+      prefs.putInt(key, newVal);
+    }
+  };
+  auto putFloatIfChanged = [](const char* key, float newVal) {
+    if (fabsf(prefs.getFloat(key, -9999.0f) - newVal) > 0.0001f) {
+      prefs.putFloat(key, newVal);
+    }
+  };
+  auto putBoolIfChanged = [](const char* key, bool newVal) {
+    if (prefs.getBool(key, false) != newVal) {
+      prefs.putBool(key, newVal);
+    }
+  };
+
+  putStringIfChanged("notes", notesText);
+  putStringIfChanged("accent", newAccent);
+  putStringIfChanged("bg", newBg);
+  putStringIfChanged("text", newText);
+  putStringIfChanged("units", unitKey);
+  putStringIfChanged("region", regionFormatKey);
+  putStringIfChanged("nickname", buddyNickname);
+  putStringIfChanged("locname", locationName);
+  putFloatIfChanged("lat", LAT);
+  putFloatIfChanged("lng", LNG);
+  putIntIfChanged("sleepMin", sleepIntervalMin);
+  putBoolIfChanged("flashMode", flashModeEnabled);
+  putStringIfChanged("calUrl", calendarUrl);
+  putStringIfChanged("spotifyUrl", spotifyUrl);
+  putStringIfChanged("githubUser", githubUser);
+  putIntIfChanged("w_goal", waterGoal);
+  putStringIfChanged("steamKey", steamApiKey);
+  putStringIfChanged("steamId", steamId);
+  putStringIfChanged("qbUrl", qbUrl);
+  putStringIfChanged("qbUser", qbUser);
+  putStringIfChanged("qbPass", qbPass);
+  putStringIfChanged("octoUrl", octoUrl);
+  putStringIfChanged("octoKey", octoKey);
+  putStringIfChanged("haUrl", haUrl);
+  putStringIfChanged("haToken", haToken);
+  putStringIfChanged("haEntityId", haEntityId);
 
   for (int p = 0; p < 3; p++) {
-    prefs.putString(("t_name" + String(p)).c_str(), tabNames[p]);
-    prefs.putInt(("t_lay" + String(p)).c_str(), (int)pageLayouts[p]);
+    putStringIfChanged(("t_name" + String(p)).c_str(), tabNames[p]);
+    putIntIfChanged(("t_lay" + String(p)).c_str(), (int)pageLayouts[p]);
     for (int i = 0; i < HOME_SLOT_COUNT; i++) {
       String slotKey = "t" + String(p) + "slot" + String(i);
-      prefs.putString(slotKey.c_str(), homeWidgetKey(pageWidgetSlots[p][i]));
-      prefs.putString((slotKey + "_lbl").c_str(), pageHaLabels[p][i]);
-      prefs.putString((slotKey + "_ent").c_str(), pageHaEntities[p][i]);
+      putStringIfChanged(slotKey.c_str(), homeWidgetKey(pageWidgetSlots[p][i]));
+      putStringIfChanged((slotKey + "_lbl").c_str(), pageHaLabels[p][i]);
+      putStringIfChanged((slotKey + "_ent").c_str(), pageHaEntities[p][i]);
     }
   }
   for (int i = 0; i < 6; i++) {
     String key = String("timer") + String(i);
-    prefs.putInt(key.c_str(), timerPresetMin[i]);
+    putIntIfChanged(key.c_str(), timerPresetMin[i]);
   }
 
   applyThemeByKey(newAccent, newBg);
@@ -893,7 +951,7 @@ static void handleSave() {
     resetDataCaches();
 
   server.sendHeader("Location", "/");
-  server.send(303);
+  server.send(303, "text/plain", "");
 }
 
 } // namespace
