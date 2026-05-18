@@ -44,6 +44,9 @@
 void hwScrollTo(uint16_t vsp);
 void hwSetupScrollArea(uint16_t tfa, uint16_t vsa, uint16_t bfa);
 
+// Global flag to suspend background network tasks during OTA updates to prevent heap out-of-memory and Cryptodeadlocks
+volatile bool otaUpdateActive = false;
+
 // =========================================================
 // DISPLAY / TOUCH
 // =========================================================
@@ -2448,6 +2451,10 @@ static bool fetchSteamRecent() {
 
 void networkFetchTask(void *pvParameters) {
   while (true) {
+    if (otaUpdateActive) {
+      vTaskDelay(2000 / portTICK_PERIOD_MS); // Sleep during OTA
+      continue;
+    }
     if (WiFi.status() == WL_CONNECTED) {
       time_t nowT = time(nullptr);
 
@@ -5088,6 +5095,9 @@ void setWifiEnabled(bool enabled) {
 }
 
 void performOTAUpdate() {
+  otaUpdateActive = true; // Suspend all background network tasks to free RAM and avoid deadlocks
+  delay(1000); // Give tasks time to safely pause and clear any active TLS sockets
+  
   tft.fillScreen(COL_BG);
   tft.setTextColor(COL_TEXT, COL_BG);
   tft.setTextDatum(MC_DATUM);
@@ -5095,6 +5105,7 @@ void performOTAUpdate() {
 
   WiFiClientSecure client;
   client.setInsecure(); // GitHub API doesn't require strict cert checking for public releases
+  client.setBufferSizes(1024, 512); // Drastically lower TLS memory footprint from 20KB to 1.5KB!
   client.setTimeout(15000); // 15 saniye timeout (hızlı hata vermesi için)
 
   HTTPClient http;
@@ -5168,6 +5179,7 @@ void performOTAUpdate() {
     delay(3000);
   }
   http.end();
+  otaUpdateActive = false; // Restore background tasks
   pageDirty = true;
 }
 
