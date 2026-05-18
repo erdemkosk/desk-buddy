@@ -141,6 +141,11 @@ HomeWidgetType pageWidgetSlots[3][HOME_SLOT_COUNT] = {
   {HOME_WIDGET_TIMER, HOME_WIDGET_NOTES, HOME_WIDGET_HUMIDITY, HOME_WIDGET_SUN}
 };
 String cachePageWidgets[3][HOME_SLOT_COUNT];
+bool pageHaStates[3][HOME_SLOT_COUNT] = {
+    {false, false, false, false, false, false},
+    {false, false, false, false, false, false},
+    {false, false, false, false, false, false}
+};
 
 bool isWidgetActive(HomeWidgetType type) {
   for (int p = 0; p < 3; p++) {
@@ -1515,6 +1520,87 @@ void toggleHomeAssistant(String entityId = "") {
   http.end();
 }
 
+bool fetchHaEntityState(String entityId) {
+  if (entityId.length() < 3 || haUrl.length() < 10) return false;
+  
+  if (entityId.indexOf(',') != -1) {
+    entityId = entityId.substring(0, entityId.indexOf(','));
+    entityId.trim();
+  }
+
+  String url = haUrl;
+  if (!url.endsWith("/")) url += "/";
+  url += "api/states/" + entityId;
+
+  WiFiClientSecure clientSecure;
+  WiFiClient clientPlain;
+  HTTPClient http;
+  http.setTimeout(3000);
+
+  bool success = false;
+  if (url.startsWith("https://")) {
+    clientSecure.setInsecure();
+    success = http.begin(clientSecure, url);
+  } else {
+    success = http.begin(clientPlain, url);
+  }
+
+  if (!success) {
+    Serial.println("[HA] GET status: begin failed");
+    return false;
+  }
+
+  if (haToken.length() > 5) {
+    http.addHeader("Authorization", "Bearer " + haToken);
+  }
+
+  int httpCode = http.GET();
+  bool isOn = false;
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (!error) {
+      String state = doc["state"].as<String>();
+      if (state == "on") {
+        isOn = true;
+      }
+    } else {
+      Serial.printf("[HA] Json parse error: %s\n", error.c_str());
+    }
+  } else {
+    Serial.printf("[HA] GET status failed, code: %d\n", httpCode);
+  }
+  http.end();
+  return isOn;
+}
+
+void fetchHomeAssistantStates() {
+  bool changed = false;
+  for (int p = 0; p < 3; p++) {
+    if (pageLayouts[p] == LAYOUT_GRID || pageLayouts[p] == LAYOUT_GRID_6) {
+      for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+        if (pageWidgetSlots[p][i] == HOME_WIDGET_HA) {
+          String entity = pageHaEntities[p][i];
+          if (entity.length() > 2) {
+            bool oldState = pageHaStates[p][i];
+            bool newState = fetchHaEntityState(entity);
+            if (oldState != newState) {
+              pageHaStates[p][i] = newState;
+              cachePageWidgets[p][i] = "";
+              changed = true;
+              Serial.printf("[HA] State updated for slot %d: %s\n", i, newState ? "ON" : "OFF");
+            }
+          }
+        }
+      }
+    }
+  }
+  if (changed) {
+    pageDirty = true;
+  }
+}
+
 // =========================================================
 // TOUCH
 // =========================================================
@@ -2444,6 +2530,15 @@ void networkFetchTask(void *pvParameters) {
           fetchOctoprintData();
         }
       }
+
+      // Home Assistant States (poll every 10 seconds)
+      if (isWidgetActive(HOME_WIDGET_HA) && haUrl.length() >= 10) {
+        static time_t lastHaFetch = 0;
+        if (lastHaFetch == 0 || (nowT - lastHaFetch) > 10) {
+          fetchHomeAssistantStates();
+          lastHaFetch = nowT;
+        }
+      }
     }
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 
@@ -2969,8 +3064,8 @@ void drawOctoprintHomeWidget(int x, int y, int w, int h, String &cache, bool for
   pushSpriteAndDelete(sprSmall, x, y);
 }
 
-void drawHAWidget(int x, int y, int w, int h, String &cache, const String &label, const String &entity, bool force = false) {
-  String combined = label + "|" + entity + "|" + String(COL_PANEL) + "|" + String(COL_TEXT) + "|" + String(COL_ACCENT);
+void drawHAWidget(int x, int y, int w, int h, String &cache, const String &label, const String &entity, bool stateActive, bool force = false) {
+  String combined = label + "|" + entity + "|" + String(stateActive ? "1" : "0") + "|" + String(COL_PANEL) + "|" + String(COL_TEXT) + "|" + String(COL_ACCENT);
   if (!force && combined == cache) return;
   cache = combined;
 
@@ -2992,8 +3087,13 @@ void drawHAWidget(int x, int y, int w, int h, String &cache, const String &label
   // Cute switch icon
   int iconX = w - 30;
   int iconY = 15;
-  sprSmall.drawRoundRect(iconX, iconY, 20, 12, 6, COL_ACCENT);
-  sprSmall.fillCircle(iconX + 6, iconY + 6, 4, COL_ACCENT);
+  if (stateActive) {
+    sprSmall.fillRoundRect(iconX, iconY, 20, 12, 6, COL_ACCENT);
+    sprSmall.fillCircle(iconX + 14, iconY + 6, 4, COL_PANEL);
+  } else {
+    sprSmall.drawRoundRect(iconX, iconY, 20, 12, 6, COL_ACCENT);
+    sprSmall.fillCircle(iconX + 6, iconY + 6, 4, COL_ACCENT);
+  }
 
   pushSpriteAndDelete(sprSmall, x, y);
 }
@@ -4219,7 +4319,7 @@ void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
     drawOctoprintHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
   case HOME_WIDGET_HA:
-    drawHAWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], pageHaLabels[pageIdx][slot], pageHaEntities[pageIdx][slot], force);
+    drawHAWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], pageHaLabels[pageIdx][slot], pageHaEntities[pageIdx][slot], pageHaStates[pageIdx][slot], force);
     break;
   }
 }
@@ -4758,6 +4858,10 @@ bool handleGridTouch(int pageIdx, int x, int y) {
       }
     } else if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_HA) {
       if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
+        pageHaStates[pageIdx][slot] = !pageHaStates[pageIdx][slot];
+        cachePageWidgets[pageIdx][slot] = "";
+        pageDirty = true;
+        
         toggleHomeAssistant(pageHaEntities[pageIdx][slot]);
         return true;
       }
