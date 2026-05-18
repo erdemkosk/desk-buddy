@@ -520,7 +520,8 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
       tabs.forEach(t => t.classList.remove('active'));
       panels.forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
-      document.getElementById(tab.dataset.tab).classList.add('active');
+      const targetPanel = document.getElementById(tab.dataset.tab);
+      if(targetPanel) targetPanel.classList.add('active');
     });
   });
 
@@ -632,7 +633,10 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
       if(navItem) {
           navItem.style.cursor = 'pointer';
           navItem.addEventListener('click', () => {
-              for(let k=0; k<3; k++) document.getElementById('sim-nav-'+k).classList.remove('active');
+              for(let k=0; k<3; k++) {
+                  const item = document.getElementById('sim-nav-'+k);
+                  if (item) item.classList.remove('active');
+              }
               navItem.classList.add('active');
               currentTabIdx = p;
               updateLayout();
