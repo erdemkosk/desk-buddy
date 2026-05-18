@@ -2746,26 +2746,20 @@ void drawGradientLine(int y, uint16_t colorStart, uint16_t colorEnd, float alpha
 void drawTopBar(const String &title) {
   tft.fillRect(0, 0, SCREEN_W, TOPBAR_H, COL_PANEL_ALT);
   
-  uint16_t colorStart = TFT_CYAN;
-  uint16_t colorEnd = COL_ACCENT;
+  uint16_t separatorColor = COL_STROKE;
 
   if (WiFi.status() != WL_CONNECTED) {
-    colorStart = TFT_RED;
-    colorEnd = 0xFBE0; // Orange-red
+    separatorColor = TFT_RED;
   } else {
     int32_t rssi = WiFi.RSSI();
     if (rssi < -75) {
-      colorStart = 0xFDA0; // Golden orange
-      colorEnd = COL_ACCENT;
+      separatorColor = 0xFDA0; // Golden amber
+    } else {
+      separatorColor = TFT_CYAN; // Neon cyan
     }
   }
 
-  // Draw gorgeous vertically fading ambient siberpunk glow separator bar (5 rows)
-  drawGradientLine(TOPBAR_H - 2, colorStart, colorEnd, 1.0f, 1); // Row 0 (100% Solid line)
-  drawGradientLine(TOPBAR_H - 1, colorStart, colorEnd, 0.70f, 1); // Row 1 (70% ambient bleed)
-  drawGradientLine(TOPBAR_H,     colorStart, colorEnd, 0.45f, 1); // Row 2 (45% ambient bleed)
-  drawGradientLine(TOPBAR_H + 1, colorStart, colorEnd, 0.25f, 1); // Row 3 (25% ambient bleed)
-  drawGradientLine(TOPBAR_H + 2, colorStart, colorEnd, 0.10f, 1); // Row 4 (10% ambient bleed)
+  tft.drawFastHLine(0, TOPBAR_H - 1, SCREEN_W, separatorColor);
 
   const int topBarMidY = TOPBAR_H / 2;
 
