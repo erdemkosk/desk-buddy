@@ -40,6 +40,10 @@
 #include "db_web_server.h"
 #include "db_wifi_provision.h"
 
+// Forward declarations for TFT hardware scrolling functions
+void hwScrollTo(uint16_t vsp);
+void hwSetupScrollArea(uint16_t tfa, uint16_t vsa, uint16_t bfa);
+
 // =========================================================
 // DISPLAY / TOUCH
 // =========================================================
