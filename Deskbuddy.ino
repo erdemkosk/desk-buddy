@@ -5081,39 +5081,51 @@ void performOTAUpdate() {
   tft.setTextDatum(MC_DATUM);
   tft.drawString("Guncelleme Araniyor...", SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
 
-  WiFiClientSecure client;
-  client.setInsecure(); // GitHub API doesn't require strict cert checking for public releases
-  client.setTimeout(15000); // 15 saniye timeout (hızlı hata vermesi için)
+  String latestVer = "";
+  int httpCode = 0;
 
-  HTTPClient http;
-  http.setTimeout(15000); // 15 saniye HTTP timeout
-  // GitHub API JSON çıktısı yerine sadece 460 byte'lık Deskbuddy_config.h dosyasını çekerek heap yorulmasını sıfıra indiriyoruz!
-  http.begin(client, "https://raw.githubusercontent.com/erdemkosk/desk-buddy/main/Deskbuddy_config.h");
-  http.addHeader("User-Agent", "ESP32-Deskbuddy");
-  int httpCode = http.GET();
-  if (httpCode == HTTP_CODE_OK) {
-    String payload = http.getString();
-    
-    // Versiyon satırını hafızayı yormadan hızlı substring araması ile ayıklıyoruz
-    String latestVer = "";
-    int idx = payload.indexOf("FIRMWARE_VERSION = \"");
-    if (idx != -1) {
-      int start = idx + 20; // 'FIRMWARE_VERSION = "' kelime uzunluğu
-      int end = payload.indexOf("\"", start);
-      if (end != -1) {
-        latestVer = payload.substring(start, end);
+  // 1. Sürüm kontrolünü yepyeni bir checkClient ile izole blokta yapıp bellekten anında temizliyoruz
+  {
+    WiFiClientSecure checkClient;
+    checkClient.setInsecure();
+    checkClient.setTimeout(15000); // 15 saniye timeout (hızlı hata vermesi için)
+
+    HTTPClient http;
+    http.setTimeout(15000); // 15 saniye HTTP timeout
+    // GitHub API JSON çıktısı yerine sadece 460 byte'lık Deskbuddy_config.h dosyasını çekerek heap yorulmasını sıfıra indiriyoruz!
+    http.begin(checkClient, "https://raw.githubusercontent.com/erdemkosk/desk-buddy/main/Deskbuddy_config.h");
+    http.addHeader("User-Agent", "ESP32-Deskbuddy");
+    httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) {
+      String payload = http.getString();
+      
+      // Versiyon satırını hafızayı yormadan hızlı substring araması ile ayıklıyoruz
+      int idx = payload.indexOf("FIRMWARE_VERSION = \"");
+      if (idx != -1) {
+        int start = idx + 20; // 'FIRMWARE_VERSION = "' kelime uzunluğu
+        int end = payload.indexOf("\"", start);
+        if (end != -1) {
+          latestVer = payload.substring(start, end);
+        }
       }
     }
+    http.end();
+  } // checkClient ve http yok edildi, RAM tamamen temizlendi!
 
+  if (httpCode == HTTP_CODE_OK) {
     if (latestVer != "" && latestVer != FIRMWARE_VERSION) {
       // Doğrudan GitHub derleme çıktı linkini oluşturuyoruz
       String downloadUrl = "https://github.com/erdemkosk/desk-buddy/releases/download/" + latestVer + "/Deskbuddy.ino.bin";
       
-      client.setTimeout(120000); // Şimdi büyük binary indirme işlemi için timeout'u 120 saniyeye yükselt
       tft.fillScreen(COL_BG);
       tft.drawString("Yeni Surum: " + latestVer, SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
       tft.drawString("Basliyor...", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
       
+      // 2. İndirme işlemi için sıfır, temiz ve yepyeni bir updateClient oluşturuyoruz
+      WiFiClientSecure updateClient;
+      updateClient.setInsecure();
+      updateClient.setTimeout(120000); // 120 saniye indirme zaman aşımı
+
       httpUpdate.onProgress([](int cur, int total) {
         static unsigned long lastDrawMs = 0;
         static int lastPercent = -1;
@@ -5142,33 +5154,33 @@ void performOTAUpdate() {
       });
 
       httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
-      t_httpUpdate_return ret = httpUpdate.update(client, downloadUrl);
+      t_httpUpdate_return ret = httpUpdate.update(updateClient, downloadUrl);
         
-        tft.fillScreen(COL_BG);
-        switch (ret) {
-          case HTTP_UPDATE_FAILED:
-            tft.drawString("Hata!", SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
-            tft.drawString(httpUpdate.getLastErrorString(), SCREEN_W / 2, SCREEN_H / 2 + 10, 1);
-            delay(3000);
-            break;
-          case HTTP_UPDATE_NO_UPDATES:
-            break;
-          case HTTP_UPDATE_OK:
-            tft.drawString("Basarili! Yeniden basliyor...", SCREEN_W / 2, SCREEN_H / 2, 2);
-            delay(1000);
-            ESP.restart();
-        }
-      } else {
-        tft.fillScreen(COL_BG);
-        tft.drawString("Sistem Guncel!", SCREEN_W / 2, SCREEN_H / 2, 2);
-        delay(2000);
+      tft.fillScreen(COL_BG);
+      switch (ret) {
+        case HTTP_UPDATE_FAILED:
+          tft.drawString("Hata!", SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
+          tft.drawString(httpUpdate.getLastErrorString(), SCREEN_W / 2, SCREEN_H / 2 + 10, 1);
+          delay(3000);
+          break;
+        case HTTP_UPDATE_NO_UPDATES:
+          break;
+        case HTTP_UPDATE_OK:
+          tft.drawString("Basarili! Yeniden basliyor...", SCREEN_W / 2, SCREEN_H / 2, 2);
+          delay(1000);
+          ESP.restart();
       }
     } else {
+      tft.fillScreen(COL_BG);
+      tft.drawString("Sistem Guncel!", SCREEN_W / 2, SCREEN_H / 2, 2);
+      delay(2000);
+    }
+  } else {
     tft.fillScreen(COL_BG);
     tft.drawString("Baglanti Hatasi! Kod: " + String(httpCode), SCREEN_W / 2, SCREEN_H / 2, 2);
     delay(3000);
   }
-  http.end();
+  
   otaUpdateActive = false; // Restore background tasks
   pageDirty = true;
 }
