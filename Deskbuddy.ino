@@ -2746,20 +2746,7 @@ void drawGradientLine(int y, uint16_t colorStart, uint16_t colorEnd, float alpha
 void drawTopBar(const String &title) {
   tft.fillRect(0, 0, SCREEN_W, TOPBAR_H, COL_PANEL_ALT);
   
-  uint16_t separatorColor = COL_STROKE;
-
-  if (WiFi.status() != WL_CONNECTED) {
-    separatorColor = TFT_RED;
-  } else {
-    int32_t rssi = WiFi.RSSI();
-    if (rssi < -75) {
-      separatorColor = 0xFDA0; // Golden amber
-    } else {
-      separatorColor = TFT_CYAN; // Neon cyan
-    }
-  }
-
-  tft.drawFastHLine(0, TOPBAR_H - 1, SCREEN_W, separatorColor);
+  tft.drawFastHLine(0, TOPBAR_H - 1, SCREEN_W, COL_STROKE);
 
   const int topBarMidY = TOPBAR_H / 2;
 
