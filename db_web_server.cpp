@@ -211,6 +211,15 @@ body { margin: 0; background: #0b1018; color: #edf2f7; font-family: system-ui, s
 .sim-clock { grid-column: 1 / -1; display: flex; justify-content: center; align-items: center; font-size: 32px; font-weight: bold; color: #fff; }
 .sim-widget { background: #1f2937; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; color: #d1d5db; transition: all 0.2s; position: relative; overflow: hidden;}
 .sim-widget::before { content: ''; position: absolute; top:0; left:0; width: 100%; height: 100%; border: 1px solid var(--accent); border-radius: 8px; opacity: 0.5; pointer-events: none;}
+.sim-widget .w-icon { font-size: 16px; margin-bottom: 2px; }
+.sim-widget .w-val { font-size: 10px; font-weight: bold; color: #fff; text-align: center; }
+.sim-widget .w-bar { width: 80%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+.sim-widget .w-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+.sim-switch { width: 16px; height: 10px; background: #4a5568; border-radius: 5px; position: relative; margin-top: 4px; transition: all 0.2s; }
+.sim-switch.active { background: var(--accent); }
+.sim-switch::after { content: ''; position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: all 0.2s; }
+.sim-switch.active::after { left: 8px; }
+@keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
 .sim-nav { height: 44px; background: #1f2937; border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-around; align-items: center; padding: 0 6px; }
 .sim-nav-item { width: 44px; height: 30px; background: #111827; border-radius: 6px; display: flex; justify-content: center; align-items: center; font-size: 11px; font-weight: bold; border: 1px solid rgba(255,255,255,0.1); }
 .sim-nav-item.active { background: var(--accent); color: #000; border-color: var(--accent); }
@@ -631,15 +640,78 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
               else {
                  w.style.display = 'flex';
                  let optText = "Slot " + (i + 1);
+                 let widgetKey = "";
                  if(sel) {
-                    const opt = sel.querySelector('option[selected]') || sel.options[0];
+                    widgetKey = sel.value;
                     if(sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
                        optText = sel.options[sel.selectedIndex].text;
-                    } else if(opt) {
-                       optText = opt.text;
                     }
                  }
-                 w.innerText = optText;
+                 
+                 let innerHTML = "";
+                 switch(widgetKey) {
+                    case "humidity":
+                       innerHTML = '<div class="w-icon">💧</div><div class="w-val">48%</div><div class="w-bar"><div class="w-bar-fill" style="width:48%"></div></div>';
+                       break;
+                    case "timer":
+                       innerHTML = '<div class="w-icon">⏱️</div><div class="w-val" style="color:#ed8936">25:00</div>';
+                       break;
+                    case "rain":
+                       innerHTML = '<div class="w-icon">🌧️</div><div class="w-val">0.2 mm</div>';
+                       break;
+                    case "outdoor":
+                       innerHTML = '<div class="w-icon">🌡️</div><div class="w-val">22.5°C</div>';
+                       break;
+                    case "kp":
+                       innerHTML = '<div class="w-icon" style="font-size:9px;color:#48bb78;font-weight:bold;">KP 2</div><div class="w-val" style="font-size:9px;color:#a0aec0;">Sakin</div>';
+                       break;
+                    case "uv":
+                       innerHTML = '<div class="w-icon">☀️</div><div class="w-val" style="color:#ecc94b">UV 3</div>';
+                       break;
+                    case "wind":
+                       innerHTML = '<div class="w-icon">💨</div><div class="w-val">12 km/h</div>';
+                       break;
+                    case "sun":
+                       innerHTML = '<div class="w-icon">🌅</div><div class="w-val">05:32</div>';
+                       break;
+                    case "finance":
+                       innerHTML = '<div class="w-icon">📈</div><div class="w-val" style="font-size:9px;">$ 32.42</div>';
+                       break;
+                    case "buddy":
+                       innerHTML = '<div class="w-icon" style="font-size:16px;animation: bounce 1s infinite;">👾</div><div class="w-val" style="font-size:8px;color:#a0aec0;">Buddy</div>';
+                       break;
+                    case "notes":
+                       innerHTML = '<div class="w-icon">📝</div><div class="w-val" style="font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:80%;">Notlarım..</div>';
+                       break;
+                    case "calendar":
+                       innerHTML = '<div class="w-icon">📅</div><div class="w-val">18 Pzt</div>';
+                       break;
+                    case "spotify":
+                       innerHTML = '<div class="w-icon" style="color:#1db954">🎵</div><div class="w-val" style="font-size:8px;color:#48bb78;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:80%;">Song..</div>';
+                       break;
+                    case "github":
+                       innerHTML = '<div class="w-icon">🐙</div><div class="w-val">12 commits</div>';
+                       break;
+                    case "water":
+                       innerHTML = '<div class="w-icon">🥛</div><div class="w-val">4 / 8</div>';
+                       break;
+                    case "steam":
+                       innerHTML = '<div class="w-icon">🎮</div><div class="w-val" style="font-size:9px;">Oynuyor</div>';
+                       break;
+                    case "qbit":
+                       innerHTML = '<div class="w-icon">⬇️</div><div class="w-val" style="font-size:9px;">4.2 MB/s</div>';
+                       break;
+                    case "octo":
+                       innerHTML = '<div class="w-icon">🖨️</div><div class="w-val">78%</div>';
+                       break;
+                    case "ha":
+                       innerHTML = '<div class="w-icon">🔌</div><div class="w-val" style="font-size:9px;color:#a0aec0;">HA Butonu</div><div class="sim-switch active"></div>';
+                       break;
+                    default:
+                       innerHTML = '<div class="w-val">' + optText + '</div>';
+                       break;
+                 }
+                 w.innerHTML = innerHTML;
               }
            }
         }
