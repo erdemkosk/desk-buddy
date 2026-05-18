@@ -283,10 +283,8 @@ SemaphoreHandle_t octoMutex = NULL;
 String haUrl = "http://192.168.1.50:8123";
 String haToken = "";
 String haEntityId = "switch.evde_3d";
-String haLabel1 = "Lamba 1";
-String haEntity1 = "";
-String haLabel2 = "Lamba 2";
-String haEntity2 = "";
+String pageHaLabels[3][HOME_SLOT_COUNT];
+String pageHaEntities[3][HOME_SLOT_COUNT];
 
 
 
@@ -328,10 +326,8 @@ const char *homeWidgetKey(HomeWidgetType type) {
     return "qbit";
   case HOME_WIDGET_OCTOPRINT:
     return "octo";
-  case HOME_WIDGET_HA1:
-    return "ha1";
-  case HOME_WIDGET_HA2:
-    return "ha2";
+  case HOME_WIDGET_HA:
+    return "ha";
   default:
     return "humidity";
 
@@ -377,10 +373,8 @@ const char *homeWidgetLabel(HomeWidgetType type) {
     return "qBittorrent";
   case HOME_WIDGET_OCTOPRINT:
     return "OctoPrint";
-  case HOME_WIDGET_HA1:
-    return "HA Widget 1";
-  case HOME_WIDGET_HA2:
-    return "HA Widget 2";
+  case HOME_WIDGET_HA:
+    return "HA Butonu";
   default:
     return "Nem";
 
@@ -425,10 +419,8 @@ HomeWidgetType homeWidgetFromKey(const String &key) {
     return HOME_WIDGET_QBITTORRENT;
   if (key == "octo")
     return HOME_WIDGET_OCTOPRINT;
-  if (key == "ha1")
-    return HOME_WIDGET_HA1;
-  if (key == "ha2")
-    return HOME_WIDGET_HA2;
+  if (key == "ha")
+    return HOME_WIDGET_HA;
   return HOME_WIDGET_HUMIDITY;
 
 
@@ -470,7 +462,7 @@ void appendHomeWidgetOptions(String &page, const String &selectedKey) {
       HOME_WIDGET_BUDDY,    HOME_WIDGET_NOTES, HOME_WIDGET_CALENDAR,
       HOME_WIDGET_SPOTIFY,  HOME_WIDGET_GITHUB, HOME_WIDGET_WATER,
       HOME_WIDGET_STEAM,    HOME_WIDGET_QBITTORRENT,
-      HOME_WIDGET_OCTOPRINT, HOME_WIDGET_HA1, HOME_WIDGET_HA2};
+      HOME_WIDGET_OCTOPRINT, HOME_WIDGET_HA};
 
   for (HomeWidgetType type : types) {
     const char *key = homeWidgetKey(type);
@@ -1390,10 +1382,6 @@ void loadStoredSettings() {
   haUrl = prefs.getString("haUrl", "http://192.168.1.50:8123");
   haToken = prefs.getString("haToken", "");
   haEntityId = prefs.getString("haEntityId", "switch.evde_3d");
-  haLabel1 = prefs.getString("haLabel1", "Lamba 1");
-  haEntity1 = prefs.getString("haEntity1", "");
-  haLabel2 = prefs.getString("haLabel2", "Lamba 2");
-  haEntity2 = prefs.getString("haEntity2", "");
 
 
 
@@ -1429,6 +1417,8 @@ void loadStoredSettings() {
       String slotKey = "t" + String(p) + "slot" + String(i);
       pageWidgetSlots[p][i] = homeWidgetFromKey(
           prefs.getString(slotKey.c_str(), homeWidgetKey(pageWidgetSlots[p][i])));
+      pageHaLabels[p][i] = prefs.getString((slotKey + "_lbl").c_str(), "");
+      pageHaEntities[p][i] = prefs.getString((slotKey + "_ent").c_str(), "");
     }
   }
 
@@ -4228,11 +4218,8 @@ void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
   case HOME_WIDGET_OCTOPRINT:
     drawOctoprintHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
-  case HOME_WIDGET_HA1:
-    drawHAWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], haLabel1, haEntity1, force);
-    break;
-  case HOME_WIDGET_HA2:
-    drawHAWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], haLabel2, haEntity2, force);
+  case HOME_WIDGET_HA:
+    drawHAWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], pageHaLabels[pageIdx][slot], pageHaEntities[pageIdx][slot], force);
     break;
   }
 }
@@ -4769,14 +4756,9 @@ bool handleGridTouch(int pageIdx, int x, int y) {
         pageDirty = true;
         return true;
       }
-    } else if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_HA1) {
+    } else if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_HA) {
       if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
-        toggleHomeAssistant(haEntity1);
-        return true;
-      }
-    } else if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_HA2) {
-      if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
-        toggleHomeAssistant(haEntity2);
+        toggleHomeAssistant(pageHaEntities[pageIdx][slot]);
         return true;
       }
     }

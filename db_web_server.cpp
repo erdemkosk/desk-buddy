@@ -69,10 +69,8 @@ extern time_t lastOctoFetch;
 extern String haUrl;
 extern String haToken;
 extern String haEntityId;
-extern String haLabel1;
-extern String haEntity1;
-extern String haLabel2;
-extern String haEntity2;
+extern String pageHaLabels[3][HOME_SLOT_COUNT];
+extern String pageHaEntities[3][HOME_SLOT_COUNT];
 
 
 
@@ -317,9 +315,16 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
     for (int i = 0; i < HOME_SLOT_COUNT; i++) {
       page += "<div id='p" + String(p) + "slot" + String(i) + "_c' style='display:" + String((pageLayouts[p] == LAYOUT_GRID && i >= 4) ? "none" : "block") + "'>";
       page += "<label class='label'>" + String(homeSlotLabel(i)) + "</label>";
-      page += "<select name='t" + String(p) + "slot" + String(i) + "' id='p" + String(p) + "slot" + String(i) + "'>";
+      page += "<select name='t" + String(p) + "slot" + String(i) + "' id='p" + String(p) + "slot" + String(i) + "' onchange='toggleHaFields(" + String(p) + "," + String(i) + ")'>";
       appendHomeWidgetOptions(page, homeWidgetKey(pageWidgetSlots[p][i]));
-      page += "</select></div>";
+      page += "</select>";
+      
+      String isHaSelected = (homeWidgetKey(pageWidgetSlots[p][i]) == String("ha")) ? "block" : "none";
+      page += "<div id='p" + String(p) + "slot" + String(i) + "_ha' style='display:" + isHaSelected + "; margin-top:5px;'>";
+      page += "<input type='text' name='t" + String(p) + "slot" + String(i) + "_lbl' placeholder='Buton Etiketi (Örn: Lamba)' value='" + htmlEscape(pageHaLabels[p][i]) + "' style='font-size:11px; padding:4px; margin-bottom:2px; width:100%; box-sizing:border-box;'>";
+      page += "<input type='text' name='t" + String(p) + "slot" + String(i) + "_ent' placeholder='Entity ID(ler)' value='" + htmlEscape(pageHaEntities[p][i]) + "' style='font-size:11px; padding:4px; width:100%; box-sizing:border-box;'>";
+      page += "</div>";
+      page += "</div>";
     }
     page += "</div><hr>";
   }
@@ -488,13 +493,6 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
         <div style="grid-column: 1/-1;"><label class="label">Varsayılan Entity ID (OctoPrint Uzun Basma - Örn: switch.evde_3d)</label><input type="text" name="haEntityId" value=")=====" + htmlEscape(haEntityId) + R"=====("></div>
       </div>
 
-      <h3 style="color:#a0aec0; margin-top:20px; font-size:14px;">Özel Home Assistant Widget Ayarları</h3>
-      <div class="grid">
-        <div><label class="label">HA Widget 1 Başlık</label><input type="text" name="haLabel1" value=")=====" + htmlEscape(haLabel1) + R"=====("></div>
-        <div><label class="label">HA Widget 1 Entity ID(ler)</label><input type="text" name="haEntity1" value=")=====" + htmlEscape(haEntity1) + R"=====("></div>
-        <div><label class="label">HA Widget 2 Başlık</label><input type="text" name="haLabel2" value=")=====" + htmlEscape(haLabel2) + R"=====("></div>
-        <div><label class="label">HA Widget 2 Entity ID(ler)</label><input type="text" name="haEntity2" value=")=====" + htmlEscape(haEntity2) + R"=====("></div>
-      </div>
     </div>
 
   </div>
@@ -502,6 +500,18 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 </form>
 
 <script>
+  function toggleHaFields(p, i) {
+    var select = document.getElementById('p' + p + 'slot' + i);
+    var div = document.getElementById('p' + p + 'slot' + i + '_ha');
+    if (select && div) {
+      if (select.value === 'ha') {
+        div.style.display = 'block';
+      } else {
+        div.style.display = 'none';
+      }
+    }
+  }
+
   // Tab Switching Logic
   const tabs = document.querySelectorAll('.tab-btn');
   const panels = document.querySelectorAll('.panel');
@@ -598,7 +608,10 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
      document.getElementById('t_name'+p).addEventListener('input', updateLayout);
      for(let i=0; i<6; i++) {
         const sel = document.getElementById('p'+p+'slot'+i);
-        if(sel) sel.addEventListener('change', updateLayout);
+        if(sel) {
+           sel.addEventListener('change', updateLayout);
+           sel.addEventListener('change', () => toggleHaFields(p, i));
+        }
      }
   }
   
@@ -647,10 +660,6 @@ static void handleSave() {
   String newHaUrl = server.hasArg("haUrl") ? server.arg("haUrl") : haUrl;
   String newHaToken = server.hasArg("haToken") ? server.arg("haToken") : haToken;
   String newHaEntityId = server.hasArg("haEntityId") ? server.arg("haEntityId") : haEntityId;
-  String newHaLabel1 = server.hasArg("haLabel1") ? server.arg("haLabel1") : haLabel1;
-  String newHaEntity1 = server.hasArg("haEntity1") ? server.arg("haEntity1") : haEntity1;
-  String newHaLabel2 = server.hasArg("haLabel2") ? server.arg("haLabel2") : haLabel2;
-  String newHaEntity2 = server.hasArg("haEntity2") ? server.arg("haEntity2") : haEntity2;
 
   newCalUrl.trim();
   String newSpotifyUrl =
@@ -686,6 +695,11 @@ static void handleSave() {
       String slotKey = "t" + String(p) + "slot" + String(i);
       String currentKey = homeWidgetKey(pageWidgetSlots[p][i]);
       newWidgetSlots[p][i] = homeWidgetFromKey(server.hasArg(slotKey) ? server.arg(slotKey) : currentKey);
+      
+      String lblKey = slotKey + "_lbl";
+      String entKey = slotKey + "_ent";
+      if (server.hasArg(lblKey)) pageHaLabels[p][i] = server.arg(lblKey);
+      if (server.hasArg(entKey)) pageHaEntities[p][i] = server.arg(entKey);
     }
   }
 
@@ -744,10 +758,6 @@ static void handleSave() {
   haUrl = newHaUrl;
   haToken = newHaToken;
   haEntityId = newHaEntityId;
-  haLabel1 = newHaLabel1;
-  haEntity1 = newHaEntity1;
-  haLabel2 = newHaLabel2;
-  haEntity2 = newHaEntity2;
 
   for (int p = 0; p < 3; p++) {
     tabNames[p] = newTabNames[p];
@@ -790,10 +800,6 @@ static void handleSave() {
   prefs.putString("haUrl", haUrl);
   prefs.putString("haToken", haToken);
   prefs.putString("haEntityId", haEntityId);
-  prefs.putString("haLabel1", haLabel1);
-  prefs.putString("haEntity1", haEntity1);
-  prefs.putString("haLabel2", haLabel2);
-  prefs.putString("haEntity2", haEntity2);
 
   for (int p = 0; p < 3; p++) {
     prefs.putString(("t_name" + String(p)).c_str(), tabNames[p]);
@@ -801,6 +807,8 @@ static void handleSave() {
     for (int i = 0; i < HOME_SLOT_COUNT; i++) {
       String slotKey = "t" + String(p) + "slot" + String(i);
       prefs.putString(slotKey.c_str(), homeWidgetKey(pageWidgetSlots[p][i]));
+      prefs.putString((slotKey + "_lbl").c_str(), pageHaLabels[p][i]);
+      prefs.putString((slotKey + "_ent").c_str(), pageHaEntities[p][i]);
     }
   }
   for (int i = 0; i < 6; i++) {
