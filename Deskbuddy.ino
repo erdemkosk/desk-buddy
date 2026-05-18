@@ -5108,7 +5108,6 @@ void performOTAUpdate() {
 
   WiFiClientSecure client;
   client.setInsecure(); // GitHub API doesn't require strict cert checking for public releases
-  client.setBufferSizes(1024, 512); // Drastically lower TLS memory footprint from 20KB to 1.5KB!
   client.setTimeout(15000); // 15 saniye timeout (hızlı hata vermesi için)
 
   HTTPClient http;
