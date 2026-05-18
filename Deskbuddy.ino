@@ -5085,42 +5085,53 @@ void performOTAUpdate() {
 
   WiFiClientSecure client;
   client.setInsecure(); // GitHub API doesn't require strict cert checking for public releases
-  client.setTimeout(15000); // 15 saniye timeout (küçük JSON kontrolü için hızlı hata versin)
+  client.setTimeout(15000); // 15 saniye timeout (hızlı hata vermesi için)
 
   HTTPClient http;
   http.setTimeout(15000); // 15 saniye HTTP timeout
-  http.begin(client, "https://api.github.com/repos/erdemkosk/desk-buddy/releases/latest");
+  // GitHub API JSON çıktısı yerine sadece 460 byte'lık Deskbuddy_config.h dosyasını çekerek heap yorulmasını sıfıra indiriyoruz!
+  http.begin(client, "https://raw.githubusercontent.com/erdemkosk/desk-buddy/main/Deskbuddy_config.h");
   http.addHeader("User-Agent", "ESP32-Deskbuddy");
   int httpCode = http.GET();
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
-    DynamicJsonDocument doc(4096);
-    deserializeJson(doc, payload);
-    String latestVer = doc["tag_name"] | "";
-    if (latestVer != "" && latestVer != FIRMWARE_VERSION) {
-      String downloadUrl = doc["assets"][0]["browser_download_url"] | "";
-      if (downloadUrl != "") {
-        client.setTimeout(120000); // Şimdi büyük binary indirme işlemi için timeout'u 120 saniyeye yükselt
-        tft.fillScreen(COL_BG);
-        tft.drawString("Yeni Surum: " + latestVer, SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
-        tft.drawString("Basliyor...", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
-        
-        httpUpdate.onProgress([](int cur, int total) {
-          static int lastPercent = -1;
-          int percent = (total > 0) ? (cur * 100) / total : 0;
-          if (percent != lastPercent && percent % 5 == 0) { // Her %5'te bir yenile (flicker'i onlemek icin)
-            lastPercent = percent;
-            tft.fillRect(0, SCREEN_H / 2, SCREEN_W, 80, COL_BG); // Sadece alt yariyi temizle
-            tft.drawString("Indiriliyor: %" + String(percent), SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
-            
-            int barWidth = (percent * (SCREEN_W - 60)) / 100;
-            tft.drawRect(30, SCREEN_H / 2 + 50, SCREEN_W - 60, 12, COL_TEXT);
-            tft.fillRect(32, SCREEN_H / 2 + 52, barWidth > 4 ? barWidth - 4 : 0, 8, COL_ACCENT);
-          }
-        });
+    
+    // Versiyon satırını hafızayı yormadan hızlı substring araması ile ayıklıyoruz
+    String latestVer = "";
+    int idx = payload.indexOf("FIRMWARE_VERSION = \"");
+    if (idx != -1) {
+      int start = idx + 20; // 'FIRMWARE_VERSION = "' kelime uzunluğu
+      int end = payload.indexOf("\"", start);
+      if (end != -1) {
+        latestVer = payload.substring(start, end);
+      }
+    }
 
-        httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-        t_httpUpdate_return ret = httpUpdate.update(client, downloadUrl);
+    if (latestVer != "" && latestVer != FIRMWARE_VERSION) {
+      // Doğrudan GitHub derleme çıktı linkini oluşturuyoruz
+      String downloadUrl = "https://github.com/erdemkosk/desk-buddy/releases/download/" + latestVer + "/Deskbuddy.ino.bin";
+      
+      client.setTimeout(120000); // Şimdi büyük binary indirme işlemi için timeout'u 120 saniyeye yükselt
+      tft.fillScreen(COL_BG);
+      tft.drawString("Yeni Surum: " + latestVer, SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
+      tft.drawString("Basliyor...", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
+      
+      httpUpdate.onProgress([](int cur, int total) {
+        static int lastPercent = -1;
+        int percent = (total > 0) ? (cur * 100) / total : 0;
+        if (percent != lastPercent && percent % 5 == 0) { // Her %5'te bir yenile (flicker'i onlemek icin)
+          lastPercent = percent;
+          tft.fillRect(0, SCREEN_H / 2, SCREEN_W, 80, COL_BG); // Sadece alt yariyi temizle
+          tft.drawString("Indiriliyor: %" + String(percent), SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
+          
+          int barWidth = (percent * (SCREEN_W - 60)) / 100;
+          tft.drawRect(30, SCREEN_H / 2 + 50, SCREEN_W - 60, 12, COL_TEXT);
+          tft.fillRect(32, SCREEN_H / 2 + 52, barWidth > 4 ? barWidth - 4 : 0, 8, COL_ACCENT);
+        }
+      });
+
+      httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+      t_httpUpdate_return ret = httpUpdate.update(client, downloadUrl);
         
         tft.fillScreen(COL_BG);
         switch (ret) {
