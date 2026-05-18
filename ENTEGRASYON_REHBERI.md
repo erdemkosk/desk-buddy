@@ -101,4 +101,38 @@ Eğer 3D Yazıcınızda OctoPrint kullanıyorsanız, baskının yüzde kaçta ol
 
 ---
 
+---
+
+## 🏡 7. Home Assistant Entegrasyonu (Akıllı Ev)
+Deskbuddy'nizi evinizdeki akıllı prizleri, ışıkları (örn: Philips Hue), senaryoları ve diğer akıllı cihazları tek dokunuşla kontrol edebileceğiniz şık bir kontrol paneline dönüştürebilirsiniz! Hem de hiçbir yazılım bilgisine ihtiyaç duymadan.
+
+### Adım 1: Home Assistant Token (Jeton) Almak
+Deskbuddy'nin evinizdeki cihazlara güvenli bir şekilde komut gönderebilmesi için bir jetona (token) ihtiyacı vardır:
+1. Tarayıcınızdan Home Assistant arayüzünüze girin (`http://192.168.1.50:8123` gibi).
+2. Sol alt köşedeki **kendi profil resminize veya adınızın ilk harfi olan yuvarlağa** (Profilim) tıklayın.
+3. Üstteki sekmelerden veya sayfayı aşağı kaydırarak **"Security" (Güvenlik)** sekmesini açın.
+4. Sayfanın en altına kaydırın ve **"Long-Lived Access Tokens" (Uzun Ömürlü Erişim Jetonları)** başlığını bulun.
+5. **"Create Token" (Jeton Oluştur)** butonuna basın, bir isim girin (Örn: `Deskbuddy`) ve tamam deyin.
+6. Karşınıza çıkan çok uzun karmaşık şifreyi **hemen kopyalayın.** (Çıkınca bir daha görünmez!).
+7. Deskbuddy Web Ayar Sayfasında `HA Token` alanına yapıştırın.
+
+### Adım 2: Deskbuddy Web Ayarlarını Doldurmak
+Deskbuddy ayarlarında `API ve Entegrasyonlar` sekmesindeki ilgili alanları doldurun:
+* **HA URL:** Home Assistant'a girdiğiniz yerel adresi yazın. *Örnek: `http://192.168.1.50:8123`* (Adresinizin yerel veya güvenli HTTPS olması fark etmez, Deskbuddy otomatik olarak uygun protokolü seçer).
+* **HA Token:** 1. Adımda kopyaladığınız uzun şifreyi yapıştırın.
+* **Varsayılan Entity ID:** OctoPrint widget'ına ekrandan **uzun basarak (basılı tutarak)** kontrol etmek istediğiniz cihazı yazın. *Örnek: `switch.evde_3d`*
+
+### Adım 3: Özel Home Assistant Widget'ları Eklemek (Kısa Dokunuşlu Butonlar)
+Deskbuddy ekranınızdaki 6 yuvaya yerleştirebileceğiniz **2 adet özel akıllı ev butonu** tanımlayabilirsiniz! Bu butonlara ekrandan **kısa bir dokunuşla (tap)** basıldığında cihazlar anında açılır/kapanır:
+1. Web ayarlarında **Özel Home Assistant Widget Ayarları** bölümünü bulun.
+2. **HA Widget 1 Başlık / 2 Başlık:** Ekranda butonun üstünde yazmasını istediğiniz ismi girin. *Örnek: `Lamba` veya `Vantilator`*
+3. **Entity ID(ler):** Home Assistant içindeki cihaz kimliğini yazın:
+   * *Tek Cihaz:* `switch.akilli_priz_soket_1` veya `light.salon_hue_lamba`
+   * *Gelişmiş - Çoklu Cihaz:* Eğer tek butona basıldığında **birden fazla prizin/ışığın aynı anda açılıp kapanmasını** istiyorsanız, aralarına virgül koyarak yazın! *Örnek: `switch.soket_1, switch.soket_2, switch.soket_3`* (Deskbuddy bu virgülleri otomatik ayıklar ve tek seferde hepsini aynı anda tetikler).
+4. Web ayarlarında **Arayüz ve Sayfalar** sekmesine giderek dilediğiniz bir yuvaya (slot) widget olarak **HA Widget 1** veya **HA Widget 2**'yi seçin.
+5. Alt taraftaki **Kaydet** butonuna basın. Deskbuddy yeniden açılınca özel butonunuz şık bir lamba/anahtar simgesiyle ekrana gelecektir!
+
+---
+
 Herhangi bir entegrasyonu yaptıktan sonra Deskbuddy web sayfasının altındaki **"Kaydet"** butonuna basmayı ve cihazın kendini yeniden başlatmasını beklemeyi unutmayın! İyi eğlenceler! 👾
+
