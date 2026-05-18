@@ -535,6 +535,7 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
       }
       sel.appendChild(option);
     });
+    sel.value = selectedKey;
   });
 
   function toggleHaFields(p, i) {
@@ -654,17 +655,78 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
      }
   }
 
+  function switchToSimTab(p) {
+      if (currentTabIdx === p) return;
+      currentTabIdx = p;
+      for(let k=0; k<3; k++) {
+          const item = document.getElementById('sim-nav-'+k);
+          if (item) {
+              if (k === p) item.classList.add('active');
+              else item.classList.remove('active');
+          }
+      }
+  }
+
   // Bind change events to all layout and slot selects
   for(let p=0; p<3; p++){
      const laySelect = document.getElementById('t_lay'+p);
      const nameInput = document.getElementById('t_name'+p);
-     if(laySelect) laySelect.addEventListener('change', updateLayout);
-     if(nameInput) nameInput.addEventListener('input', updateLayout);
+     
+     if(laySelect) {
+        laySelect.addEventListener('change', () => {
+            switchToSimTab(p);
+            updateLayout();
+        });
+        laySelect.addEventListener('focus', () => {
+            switchToSimTab(p);
+            updateLayout();
+        });
+     }
+     if(nameInput) {
+        nameInput.addEventListener('input', () => {
+            switchToSimTab(p);
+            updateLayout();
+        });
+        nameInput.addEventListener('focus', () => {
+            switchToSimTab(p);
+            updateLayout();
+        });
+     }
      for(let i=0; i<6; i++) {
         const sel = document.getElementById('p'+p+'slot'+i);
         if(sel) {
-           sel.addEventListener('change', updateLayout);
+           sel.addEventListener('change', () => {
+               switchToSimTab(p);
+               updateLayout();
+           });
+           sel.addEventListener('focus', () => {
+               switchToSimTab(p);
+               updateLayout();
+           });
            sel.addEventListener('change', () => toggleHaFields(p, i));
+        }
+        
+        const lblInput = document.getElementsByName('t'+p+'slot'+i+'_lbl')[0];
+        const entInput = document.getElementsByName('t'+p+'slot'+i+'_ent')[0];
+        if(lblInput) {
+            lblInput.addEventListener('focus', () => {
+                switchToSimTab(p);
+                updateLayout();
+            });
+            lblInput.addEventListener('input', () => {
+                switchToSimTab(p);
+                updateLayout();
+            });
+        }
+        if(entInput) {
+            entInput.addEventListener('focus', () => {
+                switchToSimTab(p);
+                updateLayout();
+            });
+            entInput.addEventListener('input', () => {
+                switchToSimTab(p);
+                updateLayout();
+            });
         }
      }
   }
@@ -675,12 +737,7 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
       if(navItem) {
           navItem.style.cursor = 'pointer';
           navItem.addEventListener('click', () => {
-              for(let k=0; k<3; k++) {
-                  const item = document.getElementById('sim-nav-'+k);
-                  if (item) item.classList.remove('active');
-              }
-              navItem.classList.add('active');
-              currentTabIdx = p;
+              switchToSimTab(p);
               updateLayout();
           });
       }
