@@ -592,67 +592,71 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
   // Layout Sync
   let currentTabIdx = 0;
   function updateLayout() {
-     const layoutSelect = document.getElementById('t_lay' + currentTabIdx);
-     if(!layoutSelect) return;
-     const val = layoutSelect.value;
-     
-     if(simCenter) simCenter.className = 'sim-center layout-' + val;
-     
-     const isGrid = (val === '0' || val === '3');
-     // Hide all grids, show current
-     for(let p=0; p<3; p++) {
-         const gridArea = document.getElementById('grid_p' + p);
-         if(gridArea) gridArea.style.display = 'none';
-     }
-     const currentGridArea = document.getElementById('grid_p' + currentTabIdx);
-     if(currentGridArea) currentGridArea.style.display = isGrid ? 'grid' : 'none';
-     
-     if (isGrid) {
-       if(!document.getElementById('sim-clock') && simCenter) {
-          simCenter.innerHTML = '<div class="sim-clock" id="sim-clock">14:30</div><div class="sim-widget" id="sim-w0">Slot 1</div><div class="sim-widget" id="sim-w1">Slot 2</div><div class="sim-widget" id="sim-w2">Slot 3</div><div class="sim-widget" id="sim-w3">Slot 4</div><div class="sim-widget" id="sim-w4" style="display:none">Slot 5</div><div class="sim-widget" id="sim-w5" style="display:none">Slot 6</div>';
-       }
-       
-       const slot4 = document.getElementById('p' + currentTabIdx + 'slot4_c');
-       const slot5 = document.getElementById('p' + currentTabIdx + 'slot5_c');
-       if(slot4) slot4.style.display = (val === '3') ? 'block' : 'none';
-       if(slot5) slot5.style.display = (val === '3') ? 'block' : 'none';
-       
-       const clock = document.getElementById('sim-clock');
-       if(clock) clock.style.display = (val === '0') ? 'flex' : 'none';
-       for(let i=0; i<6; i++) {
-          const w = document.getElementById('sim-w'+i);
-          const sel = document.getElementById('p' + currentTabIdx + 'slot' + i);
-          if (w) {
-             if (val === '0' && i >= 4) { w.style.display = 'none'; }
-             else {
-                w.style.display = 'flex';
-                let optText = "Slot " + (i + 1);
-                if(sel) {
-                   const opt = sel.querySelector('option[selected]') || sel.options[0];
-                   if(sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
-                      optText = sel.options[sel.selectedIndex].text;
-                   } else if(opt) {
-                      optText = opt.text;
-                   }
-                }
-                w.innerText = optText;
-             }
+      // 1. Sync form grids and slot collapsible visibility independently for all three Sekme pages
+      for(let p=0; p<3; p++) {
+          const gridArea = document.getElementById('grid_p' + p);
+          const laySel = document.getElementById('t_lay' + p);
+          if (gridArea && laySel) {
+              const v = laySel.value;
+              const isGrid = (v === '0' || v === '3');
+              gridArea.style.display = isGrid ? 'grid' : 'none';
+              
+              const slot4 = document.getElementById('p' + p + 'slot4_c');
+              const slot5 = document.getElementById('p' + p + 'slot5_c');
+              if(slot4) slot4.style.display = (v === '3') ? 'block' : 'none';
+              if(slot5) slot5.style.display = (v === '3') ? 'block' : 'none';
           }
-       }
-     } else if (val === '1' && simCenter) {
-       simCenter.innerHTML = '<div class="sim-clock" style="font-size:20px; color:#a0aec0; text-align:center;">Hava Durumu<br>Tam Ekran</div>';
-     } else if (val === '2' && simCenter) {
-       simCenter.innerHTML = '<div class="sim-clock" style="font-size:20px; color:#a0aec0; text-align:center;">Notlar<br>Tam Ekran</div>';
-     }
+      }
 
-     // Sync names
-     for(let p=0; p<3; p++){
-        const nameInput = document.getElementById('t_name'+p);
-        const navItem = document.getElementById('sim-nav-'+p);
-        if(nameInput && navItem) {
-           navItem.innerText = nameInput.value.substring(0,3).toUpperCase();
+      // 2. Update the live preview simulated screen based on currentTabIdx
+      const layoutSelect = document.getElementById('t_lay' + currentTabIdx);
+      if(!layoutSelect) return;
+      const val = layoutSelect.value;
+      
+      if(simCenter) simCenter.className = 'sim-center layout-' + val;
+      
+      const isGrid = (val === '0' || val === '3');
+      if (isGrid) {
+        if(!document.getElementById('sim-clock') && simCenter) {
+           simCenter.innerHTML = '<div class="sim-clock" id="sim-clock">14:30</div><div class="sim-widget" id="sim-w0">Slot 1</div><div class="sim-widget" id="sim-w1">Slot 2</div><div class="sim-widget" id="sim-w2">Slot 3</div><div class="sim-widget" id="sim-w3">Slot 4</div><div class="sim-widget" id="sim-w4" style="display:none">Slot 5</div><div class="sim-widget" id="sim-w5" style="display:none">Slot 6</div>';
         }
-     }
+        
+        const clock = document.getElementById('sim-clock');
+        if(clock) clock.style.display = (val === '0') ? 'flex' : 'none';
+        for(let i=0; i<6; i++) {
+           const w = document.getElementById('sim-w'+i);
+           const sel = document.getElementById('p' + currentTabIdx + 'slot' + i);
+           if (w) {
+              if (val === '0' && i >= 4) { w.style.display = 'none'; }
+              else {
+                 w.style.display = 'flex';
+                 let optText = "Slot " + (i + 1);
+                 if(sel) {
+                    const opt = sel.querySelector('option[selected]') || sel.options[0];
+                    if(sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
+                       optText = sel.options[sel.selectedIndex].text;
+                    } else if(opt) {
+                       optText = opt.text;
+                    }
+                 }
+                 w.innerText = optText;
+              }
+           }
+        }
+      } else if (val === '1' && simCenter) {
+        simCenter.innerHTML = '<div class="sim-clock" style="font-size:20px; color:#a0aec0; text-align:center;">Hava Durumu<br>Tam Ekran</div>';
+      } else if (val === '2' && simCenter) {
+        simCenter.innerHTML = '<div class="sim-clock" style="font-size:20px; color:#a0aec0; text-align:center;">Notlar<br>Tam Ekran</div>';
+      }
+
+      // Sync names
+      for(let p=0; p<3; p++){
+         const nameInput = document.getElementById('t_name'+p);
+         const navItem = document.getElementById('sim-nav-'+p);
+         if(nameInput && navItem) {
+            navItem.innerText = nameInput.value.substring(0,3).toUpperCase();
+         }
+      }
   }
 
   function switchToSimTab(p) {
