@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -57,4 +59,4 @@ jobs:
           name: Deskbuddy ${{ env.VERSION }}
           files: build/Deskbuddy.ino.bin
         env:
-          GITHUB_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
