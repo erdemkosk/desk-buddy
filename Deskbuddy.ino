@@ -4921,6 +4921,7 @@ void performOTAUpdate() {
 
   WiFiClientSecure client;
   client.setInsecure(); // GitHub API doesn't require strict cert checking for public releases
+  client.setTimeout(120000); // 120 saniye (2 dakika) timeout, varsayilan 15 saniyeydi yavas internette kopabiliyordu
 
   HTTPClient http;
   http.begin(client, "https://api.github.com/repos/erdemkosk/desk-buddy/releases/latest");

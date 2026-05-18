@@ -12,4 +12,4 @@
 inline constexpr const char *DESKBUDDY_SOFTAP_SSID = "Deskbuddy-Setup";
 
 /** Firmware semver; drawTopBar + web */
-inline constexpr const char *FIRMWARE_VERSION = "v2.2.6";
+inline constexpr const char *FIRMWARE_VERSION = "v2.2.7";
