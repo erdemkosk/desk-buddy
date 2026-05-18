@@ -2699,17 +2699,36 @@ bool handleWifiForgetConfirmTouch(int x, int y) {
   return true;
 }
 
-void drawGradientLine(int y, uint16_t colorStart, uint16_t colorEnd, int height = 2) {
+uint16_t blendRGB565(uint16_t color1, uint16_t color2, float alpha) {
+  uint8_t r1 = (color1 >> 11) & 0x1F;
+  uint8_t g1 = (color1 >> 5) & 0x3F;
+  uint8_t b1 = color1 & 0x1F;
+  
+  uint8_t r2 = (color2 >> 11) & 0x1F;
+  uint8_t g2 = (color2 >> 5) & 0x3F;
+  uint8_t b2 = color2 & 0x1F;
+  
+  uint8_t r = r1 + (r2 - r1) * alpha;
+  uint8_t g = g1 + (g2 - g1) * alpha;
+  uint8_t b = b1 + (b2 - b1) * alpha;
+  
+  return (r << 11) | (g << 5) | b;
+}
+
+void drawGradientLine(int y, uint16_t colorStart, uint16_t colorEnd, float alpha, int height = 1) {
+  uint16_t blendedStart = blendRGB565(COL_BG, colorStart, alpha);
+  uint16_t blendedEnd = blendRGB565(COL_BG, colorEnd, alpha);
+
   for (int x = 0; x < SCREEN_W; x += 4) {
     float t = (float)x / (float)SCREEN_W;
     
-    uint8_t r1 = (colorStart >> 11) & 0x1F;
-    uint8_t g1 = (colorStart >> 5) & 0x3F;
-    uint8_t b1 = colorStart & 0x1F;
+    uint8_t r1 = (blendedStart >> 11) & 0x1F;
+    uint8_t g1 = (blendedStart >> 5) & 0x3F;
+    uint8_t b1 = blendedStart & 0x1F;
     
-    uint8_t r2 = (colorEnd >> 11) & 0x1F;
-    uint8_t g2 = (colorEnd >> 5) & 0x3F;
-    uint8_t b2 = colorEnd & 0x1F;
+    uint8_t r2 = (blendedEnd >> 11) & 0x1F;
+    uint8_t g2 = (blendedEnd >> 5) & 0x3F;
+    uint8_t b2 = blendedEnd & 0x1F;
     
     uint8_t r = r1 + (r2 - r1) * t;
     uint8_t g = g1 + (g2 - g1) * t;
@@ -2737,7 +2756,12 @@ void drawTopBar(const String &title) {
     }
   }
 
-  drawGradientLine(TOPBAR_H - 2, colorStart, colorEnd, 2);
+  // Draw gorgeous vertically fading ambient siberpunk glow separator bar (5 rows)
+  drawGradientLine(TOPBAR_H - 2, colorStart, colorEnd, 1.0f, 1); // Row 0 (100% Solid line)
+  drawGradientLine(TOPBAR_H - 1, colorStart, colorEnd, 0.70f, 1); // Row 1 (70% ambient bleed)
+  drawGradientLine(TOPBAR_H,     colorStart, colorEnd, 0.45f, 1); // Row 2 (45% ambient bleed)
+  drawGradientLine(TOPBAR_H + 1, colorStart, colorEnd, 0.25f, 1); // Row 3 (25% ambient bleed)
+  drawGradientLine(TOPBAR_H + 2, colorStart, colorEnd, 0.10f, 1); // Row 4 (10% ambient bleed)
 
   const int topBarMidY = TOPBAR_H / 2;
 
