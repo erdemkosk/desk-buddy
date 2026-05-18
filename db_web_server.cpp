@@ -181,7 +181,7 @@ static String asciiFoldTurkishUtf8ToAscii(const String &in) {
 
 static void handleRoot() {
   String page = "";
-  page.reserve(65000);
+  page.reserve(8000);
 
   String accent = prefs.getString("accent", "cyan");
   String bg = prefs.getString("bg", "slate");
@@ -190,6 +190,12 @@ static void handleRoot() {
   String region = prefs.getString("region", "europe");
   String nickname = prefs.getString("nickname", "");
   bool flashMode = prefs.getBool("flashMode", false);
+
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Expires", "-1");
+  server.send(200, "text/html; charset=utf-8", "");
 
   page += R"=====(<!doctype html><html><head>
 <meta charset='utf-8'>
@@ -349,6 +355,9 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
     page += "</div><hr>";
   }
 
+  server.sendContent(page);
+  page = "";
+
   page += R"=====(
     </div>
 
@@ -400,7 +409,12 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
   page += htmlEscape(notesText);
   page += R"=====(</textarea>
       <span class="muted">Not: Türkçe harfler (ş, ğ, ç, ö, ü, ı) cihazda desteklenen formatlara otomatik çevrilir.</span>
-    </div>
+    </div>)=====";
+
+  server.sendContent(page);
+  page = "";
+
+  page += R"=====(
 
     <!-- Genel Ayarlar Tab -->
     <div class="panel" id="tab-settings">
@@ -472,7 +486,12 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
       <hr>
       <label class="label">Su / Alışkanlık Hedefi</label>
       <input type='number' name='waterGoal' value=')=====" + String(waterGoal) + R"=====(' min='1' max='50'>
-    </div>
+    </div>)=====";
+
+  server.sendContent(page);
+  page = "";
+
+  page += R"=====(
 
     <!-- API Tab -->
     <div class="panel" id="tab-api">
@@ -513,7 +532,12 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
         <div style="grid-column: 1/-1;"><label class="label">Varsayılan Entity ID (OctoPrint Uzun Basma - Örn: switch.evde_3d)</label><input type="text" name="haEntityId" value=")=====" + htmlEscape(haEntityId) + R"=====("></div>
       </div>
 
-    </div>
+    </div>)=====";
+
+  server.sendContent(page);
+  page = "";
+
+  page += R"=====(
 
     <!-- Update Tab -->
     <div class="panel" id="tab-update">
@@ -553,8 +577,12 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 
   </div>
 </div>
-</form>
+</form>)=====";
 
+  server.sendContent(page);
+  page = "";
+
+  page += R"=====(
 <script>
   const WIDGET_OPTIONS = [
     { key: "humidity", label: "Nem" },
@@ -979,10 +1007,8 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 </script>
 </body></html>)=====";
 
-  server.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-  server.sendHeader("Pragma", "no-cache");
-  server.sendHeader("Expires", "-1");
-  server.send(200, "text/html; charset=utf-8", page);
+  server.sendContent(page);
+  server.sendContent("");
 }
 
 static void handleSave() {
