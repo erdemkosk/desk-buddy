@@ -283,6 +283,10 @@ SemaphoreHandle_t octoMutex = NULL;
 String haUrl = "http://192.168.1.50:8123";
 String haToken = "";
 String haEntityId = "switch.evde_3d";
+String haLabel1 = "Lamba 1";
+String haEntity1 = "";
+String haLabel2 = "Lamba 2";
+String haEntity2 = "";
 
 
 
@@ -324,6 +328,10 @@ const char *homeWidgetKey(HomeWidgetType type) {
     return "qbit";
   case HOME_WIDGET_OCTOPRINT:
     return "octo";
+  case HOME_WIDGET_HA1:
+    return "ha1";
+  case HOME_WIDGET_HA2:
+    return "ha2";
   default:
     return "humidity";
 
@@ -369,6 +377,10 @@ const char *homeWidgetLabel(HomeWidgetType type) {
     return "qBittorrent";
   case HOME_WIDGET_OCTOPRINT:
     return "OctoPrint";
+  case HOME_WIDGET_HA1:
+    return "HA Widget 1";
+  case HOME_WIDGET_HA2:
+    return "HA Widget 2";
   default:
     return "Nem";
 
@@ -413,6 +425,10 @@ HomeWidgetType homeWidgetFromKey(const String &key) {
     return HOME_WIDGET_QBITTORRENT;
   if (key == "octo")
     return HOME_WIDGET_OCTOPRINT;
+  if (key == "ha1")
+    return HOME_WIDGET_HA1;
+  if (key == "ha2")
+    return HOME_WIDGET_HA2;
   return HOME_WIDGET_HUMIDITY;
 
 
@@ -454,7 +470,7 @@ void appendHomeWidgetOptions(String &page, const String &selectedKey) {
       HOME_WIDGET_BUDDY,    HOME_WIDGET_NOTES, HOME_WIDGET_CALENDAR,
       HOME_WIDGET_SPOTIFY,  HOME_WIDGET_GITHUB, HOME_WIDGET_WATER,
       HOME_WIDGET_STEAM,    HOME_WIDGET_QBITTORRENT,
-      HOME_WIDGET_OCTOPRINT};
+      HOME_WIDGET_OCTOPRINT, HOME_WIDGET_HA1, HOME_WIDGET_HA2};
 
   for (HomeWidgetType type : types) {
     const char *key = homeWidgetKey(type);
@@ -1374,6 +1390,10 @@ void loadStoredSettings() {
   haUrl = prefs.getString("haUrl", "http://192.168.1.50:8123");
   haToken = prefs.getString("haToken", "");
   haEntityId = prefs.getString("haEntityId", "switch.evde_3d");
+  haLabel1 = prefs.getString("haLabel1", "Lamba 1");
+  haEntity1 = prefs.getString("haEntity1", "");
+  haLabel2 = prefs.getString("haLabel2", "Lamba 2");
+  haEntity2 = prefs.getString("haEntity2", "");
 
 
 
@@ -1448,20 +1468,31 @@ void resetDataCaches() {
   pageDirty = true;
 }
 
-void toggleHomeAssistant() {
-  if (WiFi.status() != WL_CONNECTED || haUrl.length() < 10 || haEntityId.length() < 3)
+void toggleHomeAssistant(String entityId = "") {
+  if (entityId.length() < 1) {
+    entityId = haEntityId;
+  }
+  if (WiFi.status() != WL_CONNECTED || haUrl.length() < 10 || entityId.length() < 3)
     return;
 
-  WiFiClientSecure client;
-  client.setInsecure();
-  
   String url = haUrl;
   if (!url.endsWith("/")) url += "/";
   url += "api/services/homeassistant/toggle";
 
+  WiFiClientSecure clientSecure;
+  WiFiClient clientPlain;
   HTTPClient http;
   http.setTimeout(5000);
-  if (!http.begin(client, url)) {
+  
+  bool success = false;
+  if (url.startsWith("https://")) {
+    clientSecure.setInsecure();
+    success = http.begin(clientSecure, url);
+  } else {
+    success = http.begin(clientPlain, url);
+  }
+
+  if (!success) {
     Serial.println("[HA] begin failed");
     return;
   }
@@ -1472,9 +1503,9 @@ void toggleHomeAssistant() {
   http.addHeader("Content-Type", "application/json");
 
   String body;
-  if (haEntityId.indexOf(',') != -1) {
+  if (entityId.indexOf(',') != -1) {
     body = "{\"entity_id\": [";
-    String temp = haEntityId;
+    String temp = entityId;
     temp.replace(" ", ""); // Remove spaces
     int commaIdx;
     while ((commaIdx = temp.indexOf(',')) != -1) {
@@ -1484,7 +1515,7 @@ void toggleHomeAssistant() {
     }
     body += "\"" + temp + "\"]}";
   } else {
-    body = "{\"entity_id\": \"" + haEntityId + "\"}";
+    body = "{\"entity_id\": \"" + entityId + "\"}";
   }
 
   int code = http.POST(body);
@@ -2948,6 +2979,35 @@ void drawOctoprintHomeWidget(int x, int y, int w, int h, String &cache, bool for
   pushSpriteAndDelete(sprSmall, x, y);
 }
 
+void drawHAWidget(int x, int y, int w, int h, String &cache, const String &label, const String &entity, bool force = false) {
+  String combined = label + "|" + entity + "|" + String(COL_PANEL) + "|" + String(COL_TEXT) + "|" + String(COL_ACCENT);
+  if (!force && combined == cache) return;
+  cache = combined;
+
+  makeSpriteCard(sprSmall, w, h, true);
+  sprSmall.setTextDatum(TL_DATUM);
+  sprSmall.setTextColor(COL_TEXT, COL_PANEL);
+  sprSmall.drawString(label.length() > 0 ? label : "Akilli Ev", 10, 8, 2);
+
+  sprSmall.setTextColor(COL_DIM, COL_PANEL);
+  String displayEntity = entity;
+  if (displayEntity.indexOf('.') != -1) {
+    displayEntity = displayEntity.substring(displayEntity.indexOf('.') + 1);
+  }
+  if (displayEntity.length() > 12) {
+    displayEntity = displayEntity.substring(0, 11) + "..";
+  }
+  sprSmall.drawString(displayEntity.length() > 0 ? displayEntity : "HA Baglantisi", 10, 28, 1);
+
+  // Cute switch icon
+  int iconX = w - 30;
+  int iconY = 15;
+  sprSmall.drawRoundRect(iconX, iconY, 20, 12, 6, COL_ACCENT);
+  sprSmall.fillCircle(iconX + 6, iconY + 6, 4, COL_ACCENT);
+
+  pushSpriteAndDelete(sprSmall, x, y);
+}
+
 
 
 void drawFinanceHomeWidget(int x, int y, int w, int h, String &cache,
@@ -4168,6 +4228,12 @@ void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
   case HOME_WIDGET_OCTOPRINT:
     drawOctoprintHomeWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], force);
     break;
+  case HOME_WIDGET_HA1:
+    drawHAWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], haLabel1, haEntity1, force);
+    break;
+  case HOME_WIDGET_HA2:
+    drawHAWidget(x, y, w, h, cachePageWidgets[pageIdx][slot], haLabel2, haEntity2, force);
+    break;
   }
 }
 
@@ -4701,6 +4767,16 @@ bool handleGridTouch(int pageIdx, int x, int y) {
         prefs.putInt("w_cnt", waterCount);
         cachePageWidgets[pageIdx][slot] = "";
         pageDirty = true;
+        return true;
+      }
+    } else if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_HA1) {
+      if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
+        toggleHomeAssistant(haEntity1);
+        return true;
+      }
+    } else if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_HA2) {
+      if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
+        toggleHomeAssistant(haEntity2);
         return true;
       }
     }

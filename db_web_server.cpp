@@ -69,6 +69,10 @@ extern time_t lastOctoFetch;
 extern String haUrl;
 extern String haToken;
 extern String haEntityId;
+extern String haLabel1;
+extern String haEntity1;
+extern String haLabel2;
+extern String haEntity2;
 
 
 
@@ -477,11 +481,19 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
         <div><label class="label">OctoPrint API Key</label><input type="password" name="octoKey" value=")=====" + htmlEscape(octoKey) + R"=====("></div>
       </div>
 
-      <h3 style="color:#a0aec0; margin-top:20px; font-size:14px;">Home Assistant (OctoPrint Uzun Basma Toggle)</h3>
+      <h3 style="color:#a0aec0; margin-top:20px; font-size:14px;">Home Assistant Bağlantı Ayarları</h3>
       <div class="grid">
         <div style="grid-column: 1/-1;"><label class="label">HA URL (Örn: http://192.168.1.50:8123)</label><input type="text" name="haUrl" value=")=====" + htmlEscape(haUrl) + R"=====("></div>
-        <div><label class="label">HA Token (Long-Lived)</label><input type="password" name="haToken" value=")=====" + htmlEscape(haToken) + R"=====("></div>
-        <div><label class="label">Entity ID (Örn: switch.evde_3d)</label><input type="text" name="haEntityId" value=")=====" + htmlEscape(haEntityId) + R"=====("></div>
+        <div style="grid-column: 1/-1;"><label class="label">HA Token (Long-Lived Access Token)</label><input type="password" name="haToken" value=")=====" + htmlEscape(haToken) + R"=====("></div>
+        <div style="grid-column: 1/-1;"><label class="label">Varsayılan Entity ID (OctoPrint Uzun Basma - Örn: switch.evde_3d)</label><input type="text" name="haEntityId" value=")=====" + htmlEscape(haEntityId) + R"=====("></div>
+      </div>
+
+      <h3 style="color:#a0aec0; margin-top:20px; font-size:14px;">Özel Home Assistant Widget Ayarları</h3>
+      <div class="grid">
+        <div><label class="label">HA Widget 1 Başlık</label><input type="text" name="haLabel1" value=")=====" + htmlEscape(haLabel1) + R"=====("></div>
+        <div><label class="label">HA Widget 1 Entity ID(ler)</label><input type="text" name="haEntity1" value=")=====" + htmlEscape(haEntity1) + R"=====("></div>
+        <div><label class="label">HA Widget 2 Başlık</label><input type="text" name="haLabel2" value=")=====" + htmlEscape(haLabel2) + R"=====("></div>
+        <div><label class="label">HA Widget 2 Entity ID(ler)</label><input type="text" name="haEntity2" value=")=====" + htmlEscape(haEntity2) + R"=====("></div>
       </div>
     </div>
 
@@ -635,6 +647,10 @@ static void handleSave() {
   String newHaUrl = server.hasArg("haUrl") ? server.arg("haUrl") : haUrl;
   String newHaToken = server.hasArg("haToken") ? server.arg("haToken") : haToken;
   String newHaEntityId = server.hasArg("haEntityId") ? server.arg("haEntityId") : haEntityId;
+  String newHaLabel1 = server.hasArg("haLabel1") ? server.arg("haLabel1") : haLabel1;
+  String newHaEntity1 = server.hasArg("haEntity1") ? server.arg("haEntity1") : haEntity1;
+  String newHaLabel2 = server.hasArg("haLabel2") ? server.arg("haLabel2") : haLabel2;
+  String newHaEntity2 = server.hasArg("haEntity2") ? server.arg("haEntity2") : haEntity2;
 
   newCalUrl.trim();
   String newSpotifyUrl =
@@ -728,6 +744,10 @@ static void handleSave() {
   haUrl = newHaUrl;
   haToken = newHaToken;
   haEntityId = newHaEntityId;
+  haLabel1 = newHaLabel1;
+  haEntity1 = newHaEntity1;
+  haLabel2 = newHaLabel2;
+  haEntity2 = newHaEntity2;
 
   for (int p = 0; p < 3; p++) {
     tabNames[p] = newTabNames[p];
@@ -770,6 +790,10 @@ static void handleSave() {
   prefs.putString("haUrl", haUrl);
   prefs.putString("haToken", haToken);
   prefs.putString("haEntityId", haEntityId);
+  prefs.putString("haLabel1", haLabel1);
+  prefs.putString("haEntity1", haEntity1);
+  prefs.putString("haLabel2", haLabel2);
+  prefs.putString("haEntity2", haEntity2);
 
   for (int p = 0; p < 3; p++) {
     prefs.putString(("t_name" + String(p)).c_str(), tabNames[p]);
