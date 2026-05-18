@@ -2755,6 +2755,9 @@ void drawTopBar(const String &title) {
   
   tft.drawFastHLine(0, TOPBAR_H - 1, SCREEN_W, COL_STROKE);
 
+  // Clear the gap between the top bar and the widgets to wipe out any old gradient residue
+  tft.fillRect(0, TOPBAR_H, SCREEN_W, PAGE_ROW1_Y - TOPBAR_H, COL_BG);
+
   const int topBarMidY = TOPBAR_H / 2;
 
   tft.setTextDatum(ML_DATUM);
