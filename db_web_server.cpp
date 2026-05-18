@@ -588,11 +588,16 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
              if (val === '0' && i >= 4) { w.style.display = 'none'; }
              else {
                 w.style.display = 'flex';
-                if(sel && sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
-                   w.innerText = sel.options[sel.selectedIndex].text;
-                } else {
-                   w.innerText = "Slot " + (i + 1);
+                let optText = "Slot " + (i + 1);
+                if(sel) {
+                   const opt = sel.querySelector('option[selected]') || sel.options[0];
+                   if(sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
+                      optText = sel.options[sel.selectedIndex].text;
+                   } else if(opt) {
+                      optText = opt.text;
+                   }
                 }
+                w.innerText = optText;
              }
           }
        }
@@ -646,6 +651,16 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 
   updateColors();
   updateLayout();
+  window.addEventListener('DOMContentLoaded', () => {
+     updateColors();
+     updateLayout();
+  });
+  window.addEventListener('load', () => {
+     updateColors();
+     updateLayout();
+  });
+  setTimeout(updateLayout, 100);
+  setTimeout(updateLayout, 500);
 
 </script>
 </body></html>)=====";
