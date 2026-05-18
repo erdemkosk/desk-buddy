@@ -535,7 +535,7 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
      if(activeAccent) root.style.setProperty('--accent', activeAccent.dataset.color);
      
      const activeBg = document.querySelector('#bg-swatches .swatch.active');
-     if(activeBg) {
+     if(activeBg && simCenter && simTop) {
         simCenter.style.background = activeBg.dataset.color;
         simTop.style.background = activeBg.dataset.color;
      }
@@ -557,7 +557,7 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
      if(!layoutSelect) return;
      const val = layoutSelect.value;
      
-     simCenter.className = 'sim-center layout-' + val;
+     if(simCenter) simCenter.className = 'sim-center layout-' + val;
      
      const isGrid = (val === '0' || val === '3');
      // Hide all grids, show current
@@ -569,26 +569,35 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
      if(currentGridArea) currentGridArea.style.display = isGrid ? 'grid' : 'none';
      
      if (isGrid) {
-       if(!document.getElementById('sim-clock')) {
+       if(!document.getElementById('sim-clock') && simCenter) {
           simCenter.innerHTML = '<div class="sim-clock" id="sim-clock">14:30</div><div class="sim-widget" id="sim-w0">Slot 1</div><div class="sim-widget" id="sim-w1">Slot 2</div><div class="sim-widget" id="sim-w2">Slot 3</div><div class="sim-widget" id="sim-w3">Slot 4</div><div class="sim-widget" id="sim-w4" style="display:none">Slot 5</div><div class="sim-widget" id="sim-w5" style="display:none">Slot 6</div>';
        }
        
-       document.getElementById('p' + currentTabIdx + 'slot4_c').style.display = (val === '3') ? 'block' : 'none';
-       document.getElementById('p' + currentTabIdx + 'slot5_c').style.display = (val === '3') ? 'block' : 'none';
+       const slot4 = document.getElementById('p' + currentTabIdx + 'slot4_c');
+       const slot5 = document.getElementById('p' + currentTabIdx + 'slot5_c');
+       if(slot4) slot4.style.display = (val === '3') ? 'block' : 'none';
+       if(slot5) slot5.style.display = (val === '3') ? 'block' : 'none';
        
-       document.getElementById('sim-clock').style.display = (val === '0') ? 'flex' : 'none';
+       const clock = document.getElementById('sim-clock');
+       if(clock) clock.style.display = (val === '0') ? 'flex' : 'none';
        for(let i=0; i<6; i++) {
           const w = document.getElementById('sim-w'+i);
           const sel = document.getElementById('p' + currentTabIdx + 'slot' + i);
-          if (val === '0' && i >= 4) { w.style.display = 'none'; }
-          else {
-             w.style.display = 'flex';
-             if(sel) w.innerText = sel.options[sel.selectedIndex].text;
+          if (w) {
+             if (val === '0' && i >= 4) { w.style.display = 'none'; }
+             else {
+                w.style.display = 'flex';
+                if(sel && sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
+                   w.innerText = sel.options[sel.selectedIndex].text;
+                } else {
+                   w.innerText = "Slot " + (i + 1);
+                }
+             }
           }
        }
-     } else if (val === '1') {
+     } else if (val === '1' && simCenter) {
        simCenter.innerHTML = '<div class="sim-clock" style="font-size:20px; color:#a0aec0; text-align:center;">Hava Durumu<br>Tam Ekran</div>';
-     } else if (val === '2') {
+     } else if (val === '2' && simCenter) {
        simCenter.innerHTML = '<div class="sim-clock" style="font-size:20px; color:#a0aec0; text-align:center;">Notlar<br>Tam Ekran</div>';
      }
 
@@ -604,8 +613,10 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 
   // Bind change events to all layout and slot selects
   for(let p=0; p<3; p++){
-     document.getElementById('t_lay'+p).addEventListener('change', updateLayout);
-     document.getElementById('t_name'+p).addEventListener('input', updateLayout);
+     const laySelect = document.getElementById('t_lay'+p);
+     const nameInput = document.getElementById('t_name'+p);
+     if(laySelect) laySelect.addEventListener('change', updateLayout);
+     if(nameInput) nameInput.addEventListener('input', updateLayout);
      for(let i=0; i<6; i++) {
         const sel = document.getElementById('p'+p+'slot'+i);
         if(sel) {
