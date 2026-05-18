@@ -3734,43 +3734,18 @@ void drawClockCardSprite(bool force = false) {
 
   sprClock.setTextDatum(TL_DATUM);
 
-  // High-End Duo-Tone Bold Typography Clock çizimi
-  String hourStr = timeBuf.substring(0, 2);
-  String minStr  = timeBuf.substring(3, 5);
-  String secStr  = timeBuf.substring(6, 8);
-  String suffixStr = "";
-
-  if (useUsRegionFormat() && timeBuf.length() > 9) {
-    suffixStr = timeBuf.substring(9);
-  }
-
-  // 1. Saat hanesini en parlak renkte (COL_TEXT) çiz
   sprClock.setTextColor(COL_TEXT, COL_PANEL);
-  sprClock.drawString(hourStr, 10, 11, 4);
-  int curX = 10 + sprClock.textWidth(hourStr, 4);
-
-  // 2. İlk iki noktayı saniyede bir yanıp sönen animasyonla (COL_DIM tonda) çiz
-  bool blinkState = (tmNow.tm_sec % 2 == 0);
-  sprClock.setTextColor(blinkState ? COL_DIM : COL_PANEL, COL_PANEL);
-  sprClock.drawString(":", curX + 2, 11, 4);
-  curX += sprClock.textWidth(":", 4) + 4;
-
-  // 3. Dakika hanesini tema vurgu renginde (COL_ACCENT) çiz
-  sprClock.setTextColor(COL_ACCENT, COL_PANEL);
-  sprClock.drawString(minStr, curX, 11, 4);
-  curX += sprClock.textWidth(minStr, 4);
-
-  // 4. Saniye hanesini daha küçük (Font 2) ve hafif sönük (COL_DIM) çiz
-  sprClock.setTextColor(COL_DIM, COL_PANEL);
-  sprClock.drawString(":", curX + 1, 18, 2);
-  curX += sprClock.textWidth(":", 2) + 2;
-  sprClock.drawString(secStr, curX, 18, 2);
-  curX += sprClock.textWidth(secStr, 2);
-
-  // 5. Varsa AM/PM bilgisini en sağa küçük boyutta ekle
-  if (suffixStr.length() > 0) {
-    sprClock.setTextColor(COL_ACCENT, COL_PANEL);
-    sprClock.drawString(suffixStr, curX + 4, 18, 2);
+  if (useUsRegionFormat()) {
+    int splitAt = timeBuf.lastIndexOf(' ');
+    String clockMain = splitAt > 0 ? timeBuf.substring(0, splitAt) : timeBuf;
+    String clockSuffix = splitAt > 0 ? timeBuf.substring(splitAt + 1) : "";
+    sprClock.drawString(clockMain, 10, 11, 4);
+    if (clockSuffix.length() > 0) {
+      int suffixX = 10 + sprClock.textWidth(clockMain, 4) + 4;
+      sprClock.drawString(clockSuffix, suffixX, 18, 2);
+    }
+  } else {
+    sprClock.drawString(timeBuf, 10, 11, 4);
   }
 
   sprClock.setTextColor(COL_DIM, COL_PANEL);
