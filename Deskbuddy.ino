@@ -2699,9 +2699,45 @@ bool handleWifiForgetConfirmTouch(int x, int y) {
   return true;
 }
 
+void drawGradientLine(int y, uint16_t colorStart, uint16_t colorEnd, int height = 2) {
+  for (int x = 0; x < SCREEN_W; x += 4) {
+    float t = (float)x / (float)SCREEN_W;
+    
+    uint8_t r1 = (colorStart >> 11) & 0x1F;
+    uint8_t g1 = (colorStart >> 5) & 0x3F;
+    uint8_t b1 = colorStart & 0x1F;
+    
+    uint8_t r2 = (colorEnd >> 11) & 0x1F;
+    uint8_t g2 = (colorEnd >> 5) & 0x3F;
+    uint8_t b2 = colorEnd & 0x1F;
+    
+    uint8_t r = r1 + (r2 - r1) * t;
+    uint8_t g = g1 + (g2 - g1) * t;
+    uint8_t b = b1 + (b2 - b1) * t;
+    
+    uint16_t color = (r << 11) | (g << 5) | b;
+    tft.fillRect(x, y, 4, height, color);
+  }
+}
+
 void drawTopBar(const String &title) {
   tft.fillRect(0, 0, SCREEN_W, TOPBAR_H, COL_PANEL_ALT);
-  tft.drawFastHLine(0, TOPBAR_H - 1, SCREEN_W, COL_STROKE);
+  
+  uint16_t colorStart = TFT_CYAN;
+  uint16_t colorEnd = COL_ACCENT;
+
+  if (WiFi.status() != WL_CONNECTED) {
+    colorStart = TFT_RED;
+    colorEnd = 0xFBE0; // Orange-red
+  } else {
+    int32_t rssi = WiFi.RSSI();
+    if (rssi < -75) {
+      colorStart = 0xFDA0; // Golden orange
+      colorEnd = COL_ACCENT;
+    }
+  }
+
+  drawGradientLine(TOPBAR_H - 2, colorStart, colorEnd, 2);
 
   const int topBarMidY = TOPBAR_H / 2;
 
