@@ -5061,9 +5061,10 @@ void performOTAUpdate() {
 
   WiFiClientSecure client;
   client.setInsecure(); // GitHub API doesn't require strict cert checking for public releases
-  client.setTimeout(120000); // 120 saniye (2 dakika) timeout, varsayilan 15 saniyeydi yavas internette kopabiliyordu
+  client.setTimeout(15000); // 15 saniye timeout (küçük JSON kontrolü için hızlı hata versin)
 
   HTTPClient http;
+  http.setTimeout(15000); // 15 saniye HTTP timeout
   http.begin(client, "https://api.github.com/repos/erdemkosk/desk-buddy/releases/latest");
   http.addHeader("User-Agent", "ESP32-Deskbuddy");
   int httpCode = http.GET();
@@ -5075,6 +5076,7 @@ void performOTAUpdate() {
     if (latestVer != "" && latestVer != FIRMWARE_VERSION) {
       String downloadUrl = doc["assets"][0]["browser_download_url"] | "";
       if (downloadUrl != "") {
+        client.setTimeout(120000); // Şimdi büyük binary indirme işlemi için timeout'u 120 saniyeye yükselt
         tft.fillScreen(COL_BG);
         tft.drawString("Yeni Surum: " + latestVer, SCREEN_W / 2, SCREEN_H / 2 - 20, 2);
         tft.drawString("Basliyor...", SCREEN_W / 2, SCREEN_H / 2 + 20, 2);
