@@ -2010,33 +2010,50 @@ static bool fetchFinanceTruncgil() {
     http.end();
   }
 
-  // GOLD
+  // GOLD — stream-read: sadece "GRA" nesnesini arıyoruz, 8 KB doc yerine
+  // 512 B'lık küçük bir bellek penceresiyle heap baskısını düşürüyoruz.
   if (http.begin(client, "https://finance.truncgil.com/api/gold-rates")) {
     http.addHeader("User-Agent", ua);
     int code = http.GET();
     if (code == 200) {
-      int len = http.getSize();
-      if (len > 15000) {
-        Serial.printf("[Finance] Gold body too large: %d\n", len);
-      } else {
-        String body = http.getString();
-        DynamicJsonDocument doc(8192);
-        if (!deserializeJson(doc, body)) {
-          JsonObject rates = doc["Rates"];
-          if (!rates.isNull()) {
-            JsonObject gra = rates["GRA"];
-            if (!gra.isNull()) {
-              if (gra.containsKey("Selling")) {
-                financeGoldTryGram = gra["Selling"].as<float>();
-                got = true;
-              } else if (gra.containsKey("Buying")) {
-                financeGoldTryGram = gra["Buying"].as<float>();
-                got = true;
+      WiFiClient *stream = http.getStreamPtr();
+      // Rolling window: "GRA" bloğunu bulmak için yeterli
+      const int WIN = 256;
+      String win = "";
+      win.reserve(WIN + 64);
+      bool goldParsed = false;
+      while (stream->connected() || stream->available()) {
+        while (stream->available()) {
+          win += (char)stream->read();
+          if ((int)win.length() > WIN + 64)
+            win = win.substring(win.length() - WIN);
+          // GRA bloğunu bul ve içinden Selling/Buying al
+          int gi = win.indexOf("\"GRA\":");
+          if (gi != -1) {
+            int ob = win.indexOf("{", gi);
+            int cb = win.indexOf("}", ob);
+            if (ob != -1 && cb != -1) {
+              String gra = win.substring(ob, cb + 1);
+              int si = gra.indexOf("\"Selling\":");
+              int bi = gra.indexOf("\"Buying\":");
+              int vi = (si != -1) ? si + 10 : (bi != -1 ? bi + 9 : -1);
+              if (vi != -1) {
+                float v = gra.substring(vi).toFloat();
+                if (v > 0.0f) {
+                  financeGoldTryGram = v;
+                  got = true;
+                }
               }
+              goldParsed = true;
+              break;
             }
           }
         }
+        if (goldParsed) break;
+        vTaskDelay(2 / portTICK_PERIOD_MS);
       }
+      if (!goldParsed)
+        Serial.println("[Finance] Gold GRA not found in stream");
     } else {
       Serial.printf("[Finance] Gold failed, code: %d\n", code);
     }
@@ -2449,110 +2466,153 @@ static bool fetchSteamRecent() {
   return got;
 }
 
+// Minimum free heap required before attempting a TLS/HTTP fetch.
+// Each WiFiClientSecure + HTTPClient pair needs ~50-70 KB; below this
+// threshold the allocation will fragment or fail and trigger a panic.
+static const uint32_t NET_HEAP_MIN = 45000;
+
+// Yields briefly between fetches so destroyed TLS objects are fully
+// released back to the heap before the next allocation.
+static inline void netYield() {
+  vTaskDelay(400 / portTICK_PERIOD_MS);
+}
+
 void networkFetchTask(void *pvParameters) {
+  static unsigned long lastHeapLogMs = 0;
+
   while (true) {
     if (otaUpdateActive) {
-      vTaskDelay(2000 / portTICK_PERIOD_MS); // Sleep during OTA
+      vTaskDelay(2000 / portTICK_PERIOD_MS);
       continue;
     }
-    if (WiFi.status() == WL_CONNECTED) {
-      time_t nowT = time(nullptr);
 
-      // Spotify Data
-      if (isWidgetActive(HOME_WIDGET_SPOTIFY) && spotifyUrl.length() >= 10) {
-        time_t lastS = 0;
-        if (spotifyMutex && xSemaphoreTake(spotifyMutex, pdMS_TO_TICKS(1000))) {
-          lastS = lastSpotifyFetch;
-          xSemaphoreGive(spotifyMutex);
-        }
-        if (lastS == 0 || (nowT - lastS) > SPOTIFY_INTERVAL_SEC) {
-          fetchSpotifyData();
-        }
-      }
+    // Periodic heap diagnostic — visible on Serial Monitor (115200 baud)
+    unsigned long nowMs = millis();
+    if (nowMs - lastHeapLogMs >= 30000) {
+      lastHeapLogMs = nowMs;
+      Serial.printf("[Heap] Free: %u  MinFree: %u  MaxBlock: %u\n",
+                    ESP.getFreeHeap(),
+                    ESP.getMinFreeHeap(),
+                    ESP.getMaxAllocHeap());
+    }
 
-      // Calendar Data
-      if (isWidgetActive(HOME_WIDGET_CALENDAR) && calendarUrl.length() >= 10) {
-        time_t lastC = 0;
-        if (calendarMutex && xSemaphoreTake(calendarMutex, pdMS_TO_TICKS(1000))) {
-          lastC = lastCalendarFetch;
-          xSemaphoreGive(calendarMutex);
-        }
-        if (lastC == 0 || (nowT - lastC) > CALENDAR_INTERVAL_SEC) {
-          fetchCalendarData();
-        }
-      }
+    if (WiFi.status() != WL_CONNECTED) {
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      continue;
+    }
 
-      // GitHub Data
-      if (isWidgetActive(HOME_WIDGET_GITHUB) && githubUser.length() >= 2) {
-        time_t lastG = 0;
-        if (githubMutex && xSemaphoreTake(githubMutex, pdMS_TO_TICKS(1000))) {
-          lastG = lastGithubFetch;
-          xSemaphoreGive(githubMutex);
-        }
-        // Fetch every 1 hour (3600 sec)
-        if (lastG == 0 || (nowT - lastG) > 3600) {
-          fetchGithubData();
-        }
-      }
+    // If heap is critically low skip this whole cycle and give the
+    // allocator time to consolidate freed blocks.
+    if (ESP.getFreeHeap() < NET_HEAP_MIN) {
+      Serial.printf("[Heap] LOW (%u) — skipping network cycle\n", ESP.getFreeHeap());
+      vTaskDelay(5000 / portTICK_PERIOD_MS);
+      continue;
+    }
 
-      // Steam - Durum (online/oynuyor): 2 dakikada bir
-      if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
-        time_t lastSt = 0;
-        if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
-          lastSt = lastSteamStatusFetch;
-          xSemaphoreGive(steamMutex);
-        }
-        if (lastSt == 0 || (nowT - lastSt) > STEAM_STATUS_INTERVAL_SEC) {
-          fetchSteamStatus();
-        }
-      }
+    time_t nowT = time(nullptr);
 
-      // Steam - Son oyun/saatler: 30 dakikada bir
-      if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
-        time_t lastSr = 0;
-        if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
-          lastSr = lastSteamFetch;
-          xSemaphoreGive(steamMutex);
-        }
-        if (lastSr == 0 || (nowT - lastSr) > STEAM_RECENT_INTERVAL_SEC) {
-          fetchSteamRecent();
-        }
+    // Spotify Data
+    if (isWidgetActive(HOME_WIDGET_SPOTIFY) && spotifyUrl.length() >= 10) {
+      time_t lastS = 0;
+      if (spotifyMutex && xSemaphoreTake(spotifyMutex, pdMS_TO_TICKS(1000))) {
+        lastS = lastSpotifyFetch;
+        xSemaphoreGive(spotifyMutex);
       }
-      // qBittorrent Data
-      if (isWidgetActive(HOME_WIDGET_QBITTORRENT) && qbUrl.length() >= 8) {
-        time_t lastQ = 0;
-        if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
-          lastQ = lastQbitFetch;
-          xSemaphoreGive(qbMutex);
-        }
-        if (lastQ == 0 || (nowT - lastQ) > QBIT_INTERVAL_SEC) {
-          fetchQbittorrentData();
-        }
-      }
-
-      // OctoPrint Data
-      if (isWidgetActive(HOME_WIDGET_OCTOPRINT) && octoUrl.length() >= 8 && octoKey.length() >= 5) {
-        time_t lastO = 0;
-        if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
-          lastO = lastOctoFetch;
-          xSemaphoreGive(octoMutex);
-        }
-        if (lastO == 0 || (nowT - lastO) > OCTO_INTERVAL_SEC) {
-          fetchOctoprintData();
-        }
-      }
-
-      // Home Assistant States (poll every 10 seconds)
-      if (isWidgetActive(HOME_WIDGET_HA) && haUrl.length() >= 10) {
-        static time_t lastHaFetch = 0;
-        if (lastHaFetch == 0 || (nowT - lastHaFetch) > 10) {
-          fetchHomeAssistantStates();
-          lastHaFetch = nowT;
-        }
+      if (lastS == 0 || (nowT - lastS) > SPOTIFY_INTERVAL_SEC) {
+        if (ESP.getFreeHeap() >= NET_HEAP_MIN) fetchSpotifyData();
+        netYield();
       }
     }
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
 
+    // Calendar Data
+    if (isWidgetActive(HOME_WIDGET_CALENDAR) && calendarUrl.length() >= 10) {
+      time_t lastC = 0;
+      if (calendarMutex && xSemaphoreTake(calendarMutex, pdMS_TO_TICKS(1000))) {
+        lastC = lastCalendarFetch;
+        xSemaphoreGive(calendarMutex);
+      }
+      if (lastC == 0 || (nowT - lastC) > CALENDAR_INTERVAL_SEC) {
+        if (ESP.getFreeHeap() >= NET_HEAP_MIN) fetchCalendarData();
+        netYield();
+      }
+    }
+
+    // GitHub Data
+    if (isWidgetActive(HOME_WIDGET_GITHUB) && githubUser.length() >= 2) {
+      time_t lastG = 0;
+      if (githubMutex && xSemaphoreTake(githubMutex, pdMS_TO_TICKS(1000))) {
+        lastG = lastGithubFetch;
+        xSemaphoreGive(githubMutex);
+      }
+      if (lastG == 0 || (nowT - lastG) > 3600) {
+        if (ESP.getFreeHeap() >= NET_HEAP_MIN) fetchGithubData();
+        netYield();
+      }
+    }
+
+    // Steam - Durum (online/oynuyor)
+    if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
+      time_t lastSt = 0;
+      if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
+        lastSt = lastSteamStatusFetch;
+        xSemaphoreGive(steamMutex);
+      }
+      if (lastSt == 0 || (nowT - lastSt) > STEAM_STATUS_INTERVAL_SEC) {
+        if (ESP.getFreeHeap() >= NET_HEAP_MIN) fetchSteamStatus();
+        netYield();
+      }
+    }
+
+    // Steam - Son oyun/saatler
+    if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
+      time_t lastSr = 0;
+      if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
+        lastSr = lastSteamFetch;
+        xSemaphoreGive(steamMutex);
+      }
+      if (lastSr == 0 || (nowT - lastSr) > STEAM_RECENT_INTERVAL_SEC) {
+        if (ESP.getFreeHeap() >= NET_HEAP_MIN) fetchSteamRecent();
+        netYield();
+      }
+    }
+
+    // qBittorrent Data
+    if (isWidgetActive(HOME_WIDGET_QBITTORRENT) && qbUrl.length() >= 8) {
+      time_t lastQ = 0;
+      if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
+        lastQ = lastQbitFetch;
+        xSemaphoreGive(qbMutex);
+      }
+      if (lastQ == 0 || (nowT - lastQ) > QBIT_INTERVAL_SEC) {
+        if (ESP.getFreeHeap() >= NET_HEAP_MIN) fetchQbittorrentData();
+        netYield();
+      }
+    }
+
+    // OctoPrint Data
+    if (isWidgetActive(HOME_WIDGET_OCTOPRINT) && octoUrl.length() >= 8 && octoKey.length() >= 5) {
+      time_t lastO = 0;
+      if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
+        lastO = lastOctoFetch;
+        xSemaphoreGive(octoMutex);
+      }
+      if (lastO == 0 || (nowT - lastO) > OCTO_INTERVAL_SEC) {
+        if (ESP.getFreeHeap() >= NET_HEAP_MIN) fetchOctoprintData();
+        netYield();
+      }
+    }
+
+    // Home Assistant States (poll every 10 seconds)
+    if (isWidgetActive(HOME_WIDGET_HA) && haUrl.length() >= 10) {
+      static time_t lastHaFetch = 0;
+      if (lastHaFetch == 0 || (nowT - lastHaFetch) > 10) {
+        if (ESP.getFreeHeap() >= NET_HEAP_MIN) fetchHomeAssistantStates();
+        lastHaFetch = nowT;
+        netYield();
+      }
+    }
+
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 
@@ -5201,6 +5261,24 @@ void performOTAUpdate() {
 
 void setup() {
   Serial.begin(115200);
+
+  // Önceki reset nedenini Serial'e yaz — brownout/panic/WDT ayrımı için
+  {
+    esp_reset_reason_t reason = esp_reset_reason();
+    const char *rStr = "UNKNOWN";
+    switch (reason) {
+      case ESP_RST_POWERON:  rStr = "POWER_ON";    break;
+      case ESP_RST_SW:       rStr = "SOFTWARE";    break;
+      case ESP_RST_PANIC:    rStr = "PANIC/CRASH"; break;
+      case ESP_RST_INT_WDT:  rStr = "INT_WDT";     break;
+      case ESP_RST_TASK_WDT: rStr = "TASK_WDT";    break;
+      case ESP_RST_WDT:      rStr = "WDT";         break;
+      case ESP_RST_BROWNOUT: rStr = "BROWNOUT";    break;
+      case ESP_RST_SDIO:     rStr = "SDIO";        break;
+      default: break;
+    }
+    Serial.printf("[Boot] Reset reason: %s (%d)\n", rStr, (int)reason);
+  }
 
   pinMode(BACKLIGHT_PIN, OUTPUT);
   analogWrite(BACKLIGHT_PIN, BL_FULL);
