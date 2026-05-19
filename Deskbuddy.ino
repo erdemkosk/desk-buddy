@@ -2479,6 +2479,7 @@ static inline void netYield() {
 
 void networkFetchTask(void *pvParameters) {
   static unsigned long lastHeapLogMs = 0;
+  static unsigned long lastNvsSaveMs = 0;
 
   while (true) {
     if (otaUpdateActive) {
@@ -2490,10 +2491,17 @@ void networkFetchTask(void *pvParameters) {
     unsigned long nowMs = millis();
     if (nowMs - lastHeapLogMs >= 30000) {
       lastHeapLogMs = nowMs;
+      uint32_t minHeap = ESP.getMinFreeHeap();
       Serial.printf("[Heap] Free: %u  MinFree: %u  MaxBlock: %u\n",
-                    ESP.getFreeHeap(),
-                    ESP.getMinFreeHeap(),
-                    ESP.getMaxAllocHeap());
+                    ESP.getFreeHeap(), minHeap, ESP.getMaxAllocHeap());
+
+      // Her 5 dakikada bir heap + uptime'ı NVS'e kaydet.
+      // Cihaz çökerse sonraki açılışta bu değerler ekranda görünür.
+      if (nowMs - lastNvsSaveMs >= 300000) {
+        lastNvsSaveMs = nowMs;
+        prefs.putUInt("runtimeMinHeap", minHeap);
+        prefs.putUInt("lastUptime", nowMs / 1000);
+      }
     }
 
     if (WiFi.status() != WL_CONNECTED) {
@@ -2504,7 +2512,7 @@ void networkFetchTask(void *pvParameters) {
     // If heap is critically low skip this whole cycle and give the
     // allocator time to consolidate freed blocks.
     if (ESP.getFreeHeap() < NET_HEAP_MIN) {
-      Serial.printf("[Heap] LOW (%u) — skipping network cycle\n", ESP.getFreeHeap());
+      Serial.printf("[Heap] LOW (%u) - skipping network cycle\n", ESP.getFreeHeap());
       vTaskDelay(5000 / portTICK_PERIOD_MS);
       continue;
     }
@@ -5299,6 +5307,51 @@ void setup() {
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString("Aciliyor...", 10, 10, 2);
+
+  // Beklenmedik bir restart olduysa ekranda göster (USB olmadan tanı)
+  {
+    esp_reset_reason_t reason = esp_reset_reason();
+    bool unexpected = (reason != ESP_RST_POWERON && reason != ESP_RST_SW);
+    if (unexpected) {
+      const char *rStr = "BILINMEYEN";
+      switch (reason) {
+        case ESP_RST_PANIC:    rStr = "PANIC / COKME";   break;
+        case ESP_RST_INT_WDT:  rStr = "INT WATCHDOG";    break;
+        case ESP_RST_TASK_WDT: rStr = "TASK WATCHDOG";   break;
+        case ESP_RST_WDT:      rStr = "WATCHDOG";        break;
+        case ESP_RST_BROWNOUT: rStr = "GUC DUSUSU";      break;
+        default: break;
+      }
+      uint32_t prevMinHeap = prefs.getUInt("runtimeMinHeap", 0);
+      uint32_t prevUptime  = prefs.getUInt("lastUptime", 0);
+
+      tft.fillScreen(TFT_BLACK);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextColor(TFT_RED, TFT_BLACK);
+      tft.drawString("! BEKLENMEDIK RESTART !", SCREEN_W / 2, 35, 2);
+      tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+      tft.drawString(rStr, SCREEN_W / 2, 65, 2);
+      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      if (prevMinHeap > 0) {
+        tft.drawString("Min Heap: " + String(prevMinHeap / 1024) + " KB", SCREEN_W / 2, 95, 2);
+      }
+      if (prevUptime > 0) {
+        uint32_t h = prevUptime / 3600;
+        uint32_t m = (prevUptime % 3600) / 60;
+        char ubuf[32];
+        snprintf(ubuf, sizeof(ubuf), "Uptime: %uh %02um", h, m);
+        tft.drawString(ubuf, SCREEN_W / 2, 120, 2);
+      }
+      tft.setTextDatum(TL_DATUM);
+      delay(5000); // 5 sn oku, sonra normal boot devam eder
+      tft.fillScreen(TFT_BLACK);
+      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      tft.drawString("Aciliyor...", 10, 10, 2);
+    }
+    // Yeni oturum için sayaçları sıfırla
+    prefs.putUInt("runtimeMinHeap", ESP.getFreeHeap());
+    prefs.putUInt("lastUptime", 0);
+  }
 
   touchSPI.begin(T_SCK, T_MISO, T_MOSI);
   pinMode(TOUCH_CS, OUTPUT);
