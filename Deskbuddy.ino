@@ -5273,7 +5273,15 @@ void setup() {
 
   // Varsayılan WDT süresi 5 sn — TLS el sıkışması (3-5 sn) + HTTP okuma
   // toplamda bunu geçebilir ve TASK_WDT reset'e neden olur. 20 sn'e çıkarıyoruz.
-  esp_task_wdt_init(20, true);
+  // IDF v5 (ESP32 Arduino 3.x) yeni struct API kullanıyor.
+  {
+    esp_task_wdt_config_t wdt_cfg = {
+      .timeout_ms    = 20000,
+      .idle_core_mask = (1 << 0) | (1 << 1), // her iki core'u izle
+      .trigger_panic  = true                  // WDT'de stack trace bas, sonra reset
+    };
+    esp_task_wdt_reconfigure(&wdt_cfg);
+  }
 
   // Önceki reset nedenini Serial'e yaz — brownout/panic/WDT ayrımı için
   {
