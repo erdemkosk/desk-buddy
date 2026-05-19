@@ -33,12 +33,16 @@
 #include <XPT2046_Touchscreen.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
+
+#include <esp_system.h>
 
 #include "Deskbuddy_config.h"
 #include "Deskbuddy_layout.h"
 #include "db_web_server.h"
 #include "db_wifi_provision.h"
+#include "db_network_guard.h"
 
 // Forward declarations for TFT hardware scrolling functions
 void hwScrollTo(uint16_t vsp);
@@ -1477,6 +1481,11 @@ void toggleHomeAssistant(String entityId = "") {
   if (WiFi.status() != WL_CONNECTED || haUrl.length() < 10 || entityId.length() < 3)
     return;
 
+  const bool useTls = haUrl.startsWith("https://");
+  NetHttpScope net(useTls ? NET_HEAP_RESERVE_TLS : NET_HEAP_RESERVE_HTTP);
+  if (!net)
+    return;
+
   String url = haUrl;
   if (!url.endsWith("/")) url += "/";
   url += "api/services/homeassistant/toggle";
@@ -1527,7 +1536,7 @@ void toggleHomeAssistant(String entityId = "") {
   http.end();
 }
 
-bool fetchHaEntityState(String entityId) {
+static bool fetchHaEntityStateUnlocked(String entityId) {
   if (entityId.length() < 3 || haUrl.length() < 10) return false;
   
   if (entityId.indexOf(',') != -1) {
@@ -1564,16 +1573,18 @@ bool fetchHaEntityState(String entityId) {
   int httpCode = http.GET();
   bool isOn = false;
   if (httpCode == HTTP_CODE_OK) {
-    String payload = http.getString();
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    if (!error) {
-      String state = doc["state"].as<String>();
-      if (state == "on") {
-        isOn = true;
+    int len = http.getSize();
+    if (len > 0 && len <= 2048) {
+      String payload = http.getString();
+      StaticJsonDocument<384> doc;
+      DeserializationError error = deserializeJson(doc, payload);
+      if (!error) {
+        const char *state = doc["state"] | "";
+        if (strcmp(state, "on") == 0)
+          isOn = true;
+      } else {
+        Serial.printf("[HA] Json parse error: %s\n", error.c_str());
       }
-    } else {
-      Serial.printf("[HA] Json parse error: %s\n", error.c_str());
     }
   } else {
     Serial.printf("[HA] GET status failed, code: %d\n", httpCode);
@@ -1582,29 +1593,49 @@ bool fetchHaEntityState(String entityId) {
   return isOn;
 }
 
+bool fetchHaEntityState(String entityId) {
+  const bool useTls = haUrl.startsWith("https://");
+  NetHttpScope net(useTls ? NET_HEAP_RESERVE_TLS : NET_HEAP_RESERVE_HTTP);
+  if (!net)
+    return false;
+  return fetchHaEntityStateUnlocked(entityId);
+}
+
 void fetchHomeAssistantStates() {
-  bool changed = false;
-  for (int p = 0; p < 3; p++) {
-    if (pageLayouts[p] == LAYOUT_GRID || pageLayouts[p] == LAYOUT_GRID_6) {
-      for (int i = 0; i < HOME_SLOT_COUNT; i++) {
-        if (pageWidgetSlots[p][i] == HOME_WIDGET_HA) {
-          String entity = pageHaEntities[p][i];
-          if (entity.length() > 2) {
-            bool oldState = pageHaStates[p][i];
-            bool newState = fetchHaEntityState(entity);
-            if (oldState != newState) {
-              pageHaStates[p][i] = newState;
-              cachePageWidgets[p][i] = "";
-              changed = true;
-              Serial.printf("[HA] State updated for slot %d: %s\n", i, newState ? "ON" : "OFF");
-            }
-          }
-        }
-      }
+  const bool useTls = haUrl.startsWith("https://");
+  NetHttpScope net(useTls ? NET_HEAP_RESERVE_TLS : NET_HEAP_RESERVE_HTTP);
+  if (!net)
+    return;
+
+  static uint8_t haPollCursor = 0;
+  constexpr int haSlotCount = 3 * HOME_SLOT_COUNT;
+
+  for (int step = 0; step < haSlotCount; step++) {
+    const int slot = (haPollCursor + step) % haSlotCount;
+    const int p = slot / HOME_SLOT_COUNT;
+    const int i = slot % HOME_SLOT_COUNT;
+
+    if (pageLayouts[p] != LAYOUT_GRID && pageLayouts[p] != LAYOUT_GRID_6)
+      continue;
+    if (pageWidgetSlots[p][i] != HOME_WIDGET_HA)
+      continue;
+
+    const String entity = pageHaEntities[p][i];
+    if (entity.length() <= 2)
+      continue;
+
+    haPollCursor = (uint8_t)((slot + 1) % haSlotCount);
+
+    const bool oldState = pageHaStates[p][i];
+    const bool newState = fetchHaEntityStateUnlocked(entity);
+    if (oldState != newState) {
+      pageHaStates[p][i] = newState;
+      cachePageWidgets[p][i] = "";
+      pageDirty = true;
+      Serial.printf("[HA] State updated p%d s%d: %s\n", p, i,
+                    newState ? "ON" : "OFF");
     }
-  }
-  if (changed) {
-    pageDirty = true;
+    return;
   }
 }
 
@@ -1671,6 +1702,10 @@ bool touchNewPress(int &tx, int &ty) {
 // =========================================================
 bool fetchSunriseSunset() {
   if (WiFi.status() != WL_CONNECTED)
+    return false;
+
+  NetHttpScope net(NET_HEAP_RESERVE_TLS);
+  if (!net)
     return false;
 
   WiFiClientSecure client;
@@ -1783,6 +1818,10 @@ void ensureSunTimesForToday() {
 
 bool fetchWeather() {
   if (WiFi.status() != WL_CONNECTED)
+    return false;
+
+  NetHttpScope net(NET_HEAP_RESERVE_TLS);
+  if (!net)
     return false;
 
   WiFiClientSecure client;
@@ -1900,6 +1939,10 @@ bool fetchKpIndex() {
   if (WiFi.status() != WL_CONNECTED)
     return false;
 
+  NetHttpScope net(NET_HEAP_RESERVE_TLS);
+  if (!net)
+    return false;
+
   WiFiClientSecure client;
   client.setInsecure();
 
@@ -1977,6 +2020,10 @@ static bool fetchFinanceTruncgil() {
   if (WiFi.status() != WL_CONNECTED)
     return false;
 
+  NetHttpScope net(NET_HEAP_RESERVE_FINANCE);
+  if (!net)
+    return false;
+
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
@@ -2010,7 +2057,14 @@ static bool fetchFinanceTruncgil() {
     http.end();
   }
 
-  // GOLD
+  // GOLD (buyuk JSON; heap dusukse atla)
+  if (!netHeapOk(NET_HEAP_RESERVE_FINANCE)) {
+    if (got) {
+      lastFinanceFetch = time(nullptr);
+      lastSyncTime = lastFinanceFetch;
+    }
+    return got;
+  }
   if (http.begin(client, "https://finance.truncgil.com/api/gold-rates")) {
     http.addHeader("User-Agent", ua);
     int code = http.GET();
@@ -2066,6 +2120,10 @@ void ensureFinance() {
 
 static bool fetchCalendarData() {
   if (WiFi.status() != WL_CONNECTED || calendarUrl.length() < 10)
+    return false;
+
+  NetHttpScope net(NET_HEAP_RESERVE_TLS);
+  if (!net)
     return false;
 
   WiFiClientSecure client;
@@ -2140,6 +2198,10 @@ static bool fetchSpotifyData() {
   if (WiFi.status() != WL_CONNECTED || spotifyUrl.length() < 10)
     return false;
 
+  NetHttpScope net(NET_HEAP_RESERVE_TLS);
+  if (!net)
+    return false;
+
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
@@ -2201,6 +2263,10 @@ static bool fetchSpotifyData() {
 
 static bool fetchGithubData() {
   if (WiFi.status() != WL_CONNECTED || githubUser.length() < 2)
+    return false;
+
+  NetHttpScope net(NET_HEAP_RESERVE_TLS);
+  if (!net)
     return false;
 
   WiFiClientSecure client;
@@ -2315,6 +2381,10 @@ static bool fetchSteamStatus() {
   if (WiFi.status() != WL_CONNECTED) return false;
   if (steamApiKey.length() < 10 || steamId.length() < 5) return false;
 
+  NetHttpScope net(NET_HEAP_RESERVE_TLS);
+  if (!net)
+    return false;
+
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
@@ -2375,6 +2445,10 @@ static bool fetchSteamStatus() {
 static bool fetchSteamRecent() {
   if (WiFi.status() != WL_CONNECTED) return false;
   if (steamApiKey.length() < 10 || steamId.length() < 5) return false;
+
+  NetHttpScope net(NET_HEAP_RESERVE_TLS);
+  if (!net)
+    return false;
 
   WiFiClientSecure client;
   client.setInsecure();
@@ -2450,109 +2524,140 @@ static bool fetchSteamRecent() {
 }
 
 void networkFetchTask(void *pvParameters) {
+  static uint8_t netFetchRR = 0;
+  constexpr uint8_t kNetFetchSlots = 8;
+
   while (true) {
     if (otaUpdateActive) {
-      vTaskDelay(2000 / portTICK_PERIOD_MS); // Sleep during OTA
+      vTaskDelay(2000 / portTICK_PERIOD_MS);
       continue;
     }
     if (WiFi.status() == WL_CONNECTED) {
-      time_t nowT = time(nullptr);
+      const time_t nowT = time(nullptr);
+      bool ranFetch = false;
 
-      // Spotify Data
-      if (isWidgetActive(HOME_WIDGET_SPOTIFY) && spotifyUrl.length() >= 10) {
-        time_t lastS = 0;
-        if (spotifyMutex && xSemaphoreTake(spotifyMutex, pdMS_TO_TICKS(1000))) {
-          lastS = lastSpotifyFetch;
-          xSemaphoreGive(spotifyMutex);
-        }
-        if (lastS == 0 || (nowT - lastS) > SPOTIFY_INTERVAL_SEC) {
-          fetchSpotifyData();
+      for (uint8_t attempt = 0; attempt < kNetFetchSlots && !ranFetch; attempt++) {
+        const uint8_t slot = (uint8_t)((netFetchRR + attempt) % kNetFetchSlots);
+
+        switch (slot) {
+        case 0:
+          if (isWidgetActive(HOME_WIDGET_SPOTIFY) && spotifyUrl.length() >= 10) {
+            time_t lastS = 0;
+            if (spotifyMutex &&
+                xSemaphoreTake(spotifyMutex, pdMS_TO_TICKS(1000))) {
+              lastS = lastSpotifyFetch;
+              xSemaphoreGive(spotifyMutex);
+            }
+            if (lastS == 0 || (nowT - lastS) > SPOTIFY_INTERVAL_SEC) {
+              fetchSpotifyData();
+              ranFetch = true;
+            }
+          }
+          break;
+        case 1:
+          if (isWidgetActive(HOME_WIDGET_CALENDAR) && calendarUrl.length() >= 10) {
+            time_t lastC = 0;
+            if (calendarMutex &&
+                xSemaphoreTake(calendarMutex, pdMS_TO_TICKS(1000))) {
+              lastC = lastCalendarFetch;
+              xSemaphoreGive(calendarMutex);
+            }
+            if (lastC == 0 || (nowT - lastC) > CALENDAR_INTERVAL_SEC) {
+              fetchCalendarData();
+              ranFetch = true;
+            }
+          }
+          break;
+        case 2:
+          if (isWidgetActive(HOME_WIDGET_GITHUB) && githubUser.length() >= 2) {
+            time_t lastG = 0;
+            if (githubMutex &&
+                xSemaphoreTake(githubMutex, pdMS_TO_TICKS(1000))) {
+              lastG = lastGithubFetch;
+              xSemaphoreGive(githubMutex);
+            }
+            if (lastG == 0 || (nowT - lastG) > 3600) {
+              fetchGithubData();
+              ranFetch = true;
+            }
+          }
+          break;
+        case 3:
+          if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 &&
+              steamId.length() >= 5) {
+            time_t lastSt = 0;
+            if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
+              lastSt = lastSteamStatusFetch;
+              xSemaphoreGive(steamMutex);
+            }
+            if (lastSt == 0 || (nowT - lastSt) > STEAM_STATUS_INTERVAL_SEC) {
+              fetchSteamStatus();
+              ranFetch = true;
+            }
+          }
+          break;
+        case 4:
+          if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 &&
+              steamId.length() >= 5) {
+            time_t lastSr = 0;
+            if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
+              lastSr = lastSteamFetch;
+              xSemaphoreGive(steamMutex);
+            }
+            if (lastSr == 0 || (nowT - lastSr) > STEAM_RECENT_INTERVAL_SEC) {
+              fetchSteamRecent();
+              ranFetch = true;
+            }
+          }
+          break;
+        case 5:
+          if (isWidgetActive(HOME_WIDGET_QBITTORRENT) && qbUrl.length() >= 8) {
+            time_t lastQ = 0;
+            if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
+              lastQ = lastQbitFetch;
+              xSemaphoreGive(qbMutex);
+            }
+            if (lastQ == 0 || (nowT - lastQ) > QBIT_INTERVAL_SEC) {
+              fetchQbittorrentData();
+              ranFetch = true;
+            }
+          }
+          break;
+        case 6:
+          if (isWidgetActive(HOME_WIDGET_OCTOPRINT) && octoUrl.length() >= 8 &&
+              octoKey.length() >= 5) {
+            time_t lastO = 0;
+            if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
+              lastO = lastOctoFetch;
+              xSemaphoreGive(octoMutex);
+            }
+            if (lastO == 0 || (nowT - lastO) > OCTO_INTERVAL_SEC) {
+              fetchOctoprintData();
+              ranFetch = true;
+            }
+          }
+          break;
+        case 7:
+          if (isWidgetActive(HOME_WIDGET_HA) && haUrl.length() >= 10) {
+            static time_t lastHaFetch = 0;
+            if (lastHaFetch == 0 || (nowT - lastHaFetch) > 10) {
+              fetchHomeAssistantStates();
+              lastHaFetch = nowT;
+              ranFetch = true;
+            }
+          }
+          break;
+        default:
+          break;
         }
       }
 
-      // Calendar Data
-      if (isWidgetActive(HOME_WIDGET_CALENDAR) && calendarUrl.length() >= 10) {
-        time_t lastC = 0;
-        if (calendarMutex && xSemaphoreTake(calendarMutex, pdMS_TO_TICKS(1000))) {
-          lastC = lastCalendarFetch;
-          xSemaphoreGive(calendarMutex);
-        }
-        if (lastC == 0 || (nowT - lastC) > CALENDAR_INTERVAL_SEC) {
-          fetchCalendarData();
-        }
-      }
-
-      // GitHub Data
-      if (isWidgetActive(HOME_WIDGET_GITHUB) && githubUser.length() >= 2) {
-        time_t lastG = 0;
-        if (githubMutex && xSemaphoreTake(githubMutex, pdMS_TO_TICKS(1000))) {
-          lastG = lastGithubFetch;
-          xSemaphoreGive(githubMutex);
-        }
-        // Fetch every 1 hour (3600 sec)
-        if (lastG == 0 || (nowT - lastG) > 3600) {
-          fetchGithubData();
-        }
-      }
-
-      // Steam - Durum (online/oynuyor): 2 dakikada bir
-      if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
-        time_t lastSt = 0;
-        if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
-          lastSt = lastSteamStatusFetch;
-          xSemaphoreGive(steamMutex);
-        }
-        if (lastSt == 0 || (nowT - lastSt) > STEAM_STATUS_INTERVAL_SEC) {
-          fetchSteamStatus();
-        }
-      }
-
-      // Steam - Son oyun/saatler: 30 dakikada bir
-      if (isWidgetActive(HOME_WIDGET_STEAM) && steamApiKey.length() >= 10 && steamId.length() >= 5) {
-        time_t lastSr = 0;
-        if (steamMutex && xSemaphoreTake(steamMutex, pdMS_TO_TICKS(1000))) {
-          lastSr = lastSteamFetch;
-          xSemaphoreGive(steamMutex);
-        }
-        if (lastSr == 0 || (nowT - lastSr) > STEAM_RECENT_INTERVAL_SEC) {
-          fetchSteamRecent();
-        }
-      }
-      // qBittorrent Data
-      if (isWidgetActive(HOME_WIDGET_QBITTORRENT) && qbUrl.length() >= 8) {
-        time_t lastQ = 0;
-        if (qbMutex && xSemaphoreTake(qbMutex, pdMS_TO_TICKS(1000))) {
-          lastQ = lastQbitFetch;
-          xSemaphoreGive(qbMutex);
-        }
-        if (lastQ == 0 || (nowT - lastQ) > QBIT_INTERVAL_SEC) {
-          fetchQbittorrentData();
-        }
-      }
-
-      // OctoPrint Data
-      if (isWidgetActive(HOME_WIDGET_OCTOPRINT) && octoUrl.length() >= 8 && octoKey.length() >= 5) {
-        time_t lastO = 0;
-        if (octoMutex && xSemaphoreTake(octoMutex, pdMS_TO_TICKS(1000))) {
-          lastO = lastOctoFetch;
-          xSemaphoreGive(octoMutex);
-        }
-        if (lastO == 0 || (nowT - lastO) > OCTO_INTERVAL_SEC) {
-          fetchOctoprintData();
-        }
-      }
-
-      // Home Assistant States (poll every 10 seconds)
-      if (isWidgetActive(HOME_WIDGET_HA) && haUrl.length() >= 10) {
-        static time_t lastHaFetch = 0;
-        if (lastHaFetch == 0 || (nowT - lastHaFetch) > 10) {
-          fetchHomeAssistantStates();
-          lastHaFetch = nowT;
-        }
+      if (ranFetch) {
+        netFetchRR = (uint8_t)((netFetchRR + 1) % kNetFetchSlots);
+        vTaskDelay(80 / portTICK_PERIOD_MS);
       }
     }
     vTaskDelay(1000 / portTICK_PERIOD_MS);
-
   }
 }
 
@@ -2860,6 +2965,10 @@ void pushSpriteAndKeep(TFT_eSprite &spr, int x, int y) {
 void fetchQbittorrentData() {
   if (qbUrl.length() < 5) return;
 
+  NetHttpScope net(NET_HEAP_RESERVE_HTTP);
+  if (!net)
+    return;
+
   HTTPClient http;
   http.setReuse(true);
   http.setTimeout(4000);
@@ -2988,6 +3097,10 @@ void drawQbittorrentHomeWidget(int x, int y, int w, int h, String &cache, bool f
 
 void fetchOctoprintData() {
   if (octoUrl.length() < 5 || octoKey.length() < 5) return;
+
+  NetHttpScope net(NET_HEAP_RESERVE_HTTP);
+  if (!net)
+    return;
 
   HTTPClient http;
   http.setReuse(true);
@@ -5061,6 +5174,8 @@ void setWifiEnabled(bool enabled) {
       wifiConnectInProgress = false;
       WiFi.disconnect(true, true);
       WiFi.mode(WIFI_OFF);
+      delay(120);
+      ESP.restart();
       return;
     }
     beginWiFiConnect();
@@ -5071,8 +5186,19 @@ void setWifiEnabled(bool enabled) {
 }
 
 void performOTAUpdate() {
-  otaUpdateActive = true; // Suspend all background network tasks to free RAM and avoid deadlocks
-  delay(1000); // Give tasks time to safely pause and clear any active TLS sockets
+  otaUpdateActive = true;
+  delay(1000);
+
+  if (!netHttpBegin(NET_HEAP_RESERVE_TLS, 15000)) {
+    otaUpdateActive = false;
+    tft.fillScreen(COL_BG);
+    tft.setTextColor(COL_TEXT, COL_BG);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("Bellek yetersiz", SCREEN_W / 2, SCREEN_H / 2, 2);
+    delay(2000);
+    pageDirty = true;
+    return;
+  }
   
   tft.fillScreen(COL_BG);
   tft.setTextColor(COL_TEXT, COL_BG);
@@ -5193,12 +5319,16 @@ void performOTAUpdate() {
     delay(3000);
   }
   
-  otaUpdateActive = false; // Restore background tasks
+  netHttpEnd();
+  otaUpdateActive = false;
   pageDirty = true;
 }
 
 void setup() {
   Serial.begin(115200);
+  netGuardInit();
+  Serial.printf("[Boot] reset reason %d, free heap %u\n",
+                (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
 
   pinMode(BACKLIGHT_PIN, OUTPUT);
   analogWrite(BACKLIGHT_PIN, BL_FULL);
@@ -5250,7 +5380,7 @@ void setup() {
   qbMutex = xSemaphoreCreateMutex();
   octoMutex = xSemaphoreCreateMutex();
   if (spotifyMutex || calendarMutex || githubMutex || steamMutex || qbMutex || octoMutex) {
-    xTaskCreatePinnedToCore(networkFetchTask, "NetworkTask", 10240, NULL, 1,
+    xTaskCreatePinnedToCore(networkFetchTask, "NetworkTask", 16384, NULL, 1,
                             NULL, 0);
   }
 
