@@ -5061,8 +5061,6 @@ void setWifiEnabled(bool enabled) {
       wifiConnectInProgress = false;
       WiFi.disconnect(true, true);
       WiFi.mode(WIFI_OFF);
-      delay(120);
-      ESP.restart();
       return;
     }
     beginWiFiConnect();
