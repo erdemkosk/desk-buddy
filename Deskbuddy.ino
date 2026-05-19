@@ -22,6 +22,7 @@
 
 #include <ArduinoJson.h>
 #include <DNSServer.h>
+#include "esp_task_wdt.h"
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <SPI.h>
@@ -2088,7 +2089,7 @@ static bool fetchCalendarData() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(12000);
+  http.setTimeout(8000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   bool got = false;
@@ -2160,7 +2161,7 @@ static bool fetchSpotifyData() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(12000);
+  http.setTimeout(8000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   bool got = false;
@@ -2223,7 +2224,7 @@ static bool fetchGithubData() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(15000);
+  http.setTimeout(10000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   bool got = false;
@@ -5269,6 +5270,10 @@ void performOTAUpdate() {
 
 void setup() {
   Serial.begin(115200);
+
+  // Varsayılan WDT süresi 5 sn — TLS el sıkışması (3-5 sn) + HTTP okuma
+  // toplamda bunu geçebilir ve TASK_WDT reset'e neden olur. 20 sn'e çıkarıyoruz.
+  esp_task_wdt_init(20, true);
 
   // Önceki reset nedenini Serial'e yaz — brownout/panic/WDT ayrımı için
   {
