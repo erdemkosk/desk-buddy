@@ -3,6 +3,7 @@
  */
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <Preferences.h>
 #include <WebServer.h>
 #include <Update.h>
@@ -26,6 +27,8 @@ void applyTextColorByKey(const String &key);
 void restoreSleepAwareBacklight();
 void resetDataCaches();
 int sanitizeTimerMinutes(int value);
+bool applyRemoteControl(const String &action, int pageIndex);
+void buildRemoteStatusJson(String &out);
 
 extern WebServer server;
 extern Preferences prefs;
@@ -263,6 +266,14 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 #drop-zone.dragover { border-color: var(--accent); background: rgba(6, 182, 212, 0.15); }
 .update-status-ok { background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; }
 .update-status-fail { background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
+.control-status-box { background: #111827; border: 1px solid #334155; border-radius: 12px; padding: 14px 16px; margin-bottom: 18px; font-size: 14px; line-height: 1.6; color: #e2e8f0; }
+.control-action-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+.control-action-btn { flex: 1 1 120px; margin: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid #334155; background: #1f2937; color: #f1f5f9; font-weight: 600; cursor: pointer; font: inherit; }
+.control-action-btn:hover { border-color: var(--accent); }
+.control-page-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 420px; }
+.control-page-btn { padding: 14px 10px; border-radius: 10px; border: 1px solid #334155; background: #1f2937; color: #f1f5f9; font-weight: 600; cursor: pointer; font: inherit; }
+.control-page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+.control-page-btn:hover:not(.active) { border-color: var(--accent); }
 @media(max-width: 800px) {
   .app-container { flex-direction: column; align-items: center; }
   .preview-pane { position: relative; top: 0; width: 100%; max-width: 300px; }
@@ -274,8 +285,17 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 </head><body>
 <div class="hero">
   <h1>Deskbuddy Ayar Paneli</h1>
-  <p>IP: )=====";
-  page += WiFi.localIP().toString();
+  <p>)=====";
+  if (WiFi.status() == WL_CONNECTED) {
+    page += "<a href=\"http://";
+    page += DESKBUDDY_MDNS_HOSTNAME;
+    page += ".local/\" style=\"color:inherit;font-weight:600;\">";
+    page += DESKBUDDY_MDNS_HOSTNAME;
+    page += ".local</a> | IP: ";
+    page += WiFi.localIP().toString();
+  } else {
+    page += "Ag bagli degil";
+  }
   page += R"=====( | Firmware: )=====";
   page += FIRMWARE_VERSION;
   page += R"=====(</p>
@@ -316,6 +336,8 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
     <button type="button" class="tab-btn" data-tab="tab-settings">Genel Ayarlar</button>
     <button type="button" class="tab-btn" data-tab="tab-api">Bağlantılar (API)</button>
     <button type="button" class="tab-btn" data-tab="tab-update">Güncelleme</button>
+    <button type="button" class="tab-btn" data-tab="tab-backup">Yedekleme</button>
+    <button type="button" class="tab-btn" data-tab="tab-control">Yonet</button>
     <button type="submit" class="submit-btn">Cihaza Kaydet</button>
   </div>
 
@@ -573,6 +595,62 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
       </div>
       
       <div id="update-status-msg" style="display: none; margin-top: 16px; padding: 14px; border-radius: 8px; font-size: 13px; text-align: center; font-weight: 600; line-height: 1.4;"></div>
+    </div>
+
+    <!-- Backup Tab -->
+    <div class="panel" id="tab-backup">
+      <h2>Ayar Yedekleme</h2>
+      <p style="font-size: 14px; color: #9ca3af; line-height: 1.5;">
+        Tum ayarlar, widget duzeni, entegrasyonlar (API tokenlari, sifreler) ve Wi-Fi bilgisi tek bir JSON dosyasina kaydedilir.
+        Cihazi sifirlarken veya deneme yaparken yedeginizi saklayin.
+      </p>
+      <p style="font-size: 13px; color: #fbbf24; line-height: 1.45; margin-top: 8px;">
+        Uyari: Yedek dosyasi hassas bilgiler icerir. Guvenli bir yerde saklayin.
+      </p>
+      <hr>
+      <div style="display: flex; flex-direction: column; gap: 14px; max-width: 420px;">
+        <button type="button" id="btn-export-backup" class="download-link-btn" style="margin: 0;">
+          Yedegi Indir (.json)
+        </button>
+        <div>
+          <label class="label">Yedegi Geri Yukle</label>
+          <input type="file" id="import-backup-file" accept=".json,application/json" style="width: 100%; max-width: 420px; padding: 10px; border-radius: 10px; border: 1px solid #334155; background: #0b1220; color: #f1f5f9; box-sizing: border-box;">
+        </div>
+        <button type="button" id="btn-import-backup" class="submit-btn" style="margin-top: 0;">
+          Yedegi Geri Yukle ve Yeniden Baslat
+        </button>
+      </div>
+      <div id="backup-status-msg" style="display: none; margin-top: 16px; padding: 14px; border-radius: 8px; font-size: 13px; text-align: center; font-weight: 600; line-height: 1.4;"></div>
+    </div>
+
+)=====";
+
+  page += R"=====(
+    <!-- Control Tab -->
+    <div class="panel" id="tab-control">
+      <h2>Uzaktan Yonetim</h2>
+      <p style="font-size: 14px; color: #9ca3af; line-height: 1.5;">
+        Cihaza dokunmadan ekrani uyandir, karart veya sekmeler arasi gec. Tam siyah uyku modundayken bile calisir.
+      </p>
+      <div id="control-status-box" class="control-status-box">Durum yukleniyor...</div>
+      <label class="label">Ekran</label>
+      <div class="control-action-row">
+        <button type="button" class="control-action-btn" data-action="wake">Uyandir</button>
+        <button type="button" class="control-action-btn" data-action="dim">Karart</button>
+        <button type="button" class="control-action-btn" data-action="sleep">Uyut (siyah)</button>
+      </div>
+      <label class="label">Sekme</label>
+      <div class="control-page-grid" id="control-page-grid">
+)=====";
+
+  for (int i = 0; i < 4; i++) {
+    page += "<button type=\"button\" class=\"control-page-btn\" data-page=\"" +
+            String(i) + "\">" + htmlEscape(tabNames[i]) + "</button>";
+  }
+
+  page += R"=====(
+      </div>
+      <div id="control-status-msg" style="display: none; margin-top: 16px; padding: 14px; border-radius: 8px; font-size: 13px; text-align: center; font-weight: 600; line-height: 1.4;"></div>
     </div>
 
   </div>
@@ -1004,6 +1082,127 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
     statusMsg.style.display = 'block';
   }
 
+  const backupStatusMsg = document.getElementById('backup-status-msg');
+  function showBackupStatus(msg, isSuccess) {
+    if (!backupStatusMsg) return;
+    backupStatusMsg.innerText = msg;
+    backupStatusMsg.className = isSuccess ? 'update-status-ok' : 'update-status-fail';
+    backupStatusMsg.style.display = 'block';
+  }
+
+  document.getElementById('btn-export-backup')?.addEventListener('click', () => {
+    window.location.href = '/export';
+  });
+
+  document.getElementById('btn-import-backup')?.addEventListener('click', async () => {
+    const fileInput = document.getElementById('import-backup-file');
+    const file = fileInput?.files?.[0];
+    if (!file) {
+      showBackupStatus('Once bir JSON yedek dosyasi secin.', false);
+      return;
+    }
+    if (!confirm('Mevcut tum ayarlarin uzerine yazilacak ve cihaz yeniden baslayacak. Devam edilsin mi?')) {
+      return;
+    }
+    showBackupStatus('Yedek yukleniyor...', true);
+    try {
+      const text = await file.text();
+      const res = await fetch('/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: text
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) {}
+      if (res.ok && data.ok) {
+        showBackupStatus(data.message || 'Yedek yuklendi. Yeniden baslatiliyor...', true);
+        setTimeout(() => { window.location.href = '/'; }, 4000);
+      } else {
+        showBackupStatus(data.error || ('Yukleme basarisiz (HTTP ' + res.status + ')'), false);
+      }
+    } catch (err) {
+      showBackupStatus('Baglanti hatasi: yedek yuklenemedi.', false);
+    }
+  });
+
+  const controlStatusBox = document.getElementById('control-status-box');
+  const controlStatusMsg = document.getElementById('control-status-msg');
+  let controlPollTimer = null;
+
+  function screenLabel(screen) {
+    if (screen === 'off') return 'Kapali (siyah)';
+    if (screen === 'dim') return 'Loş / karartilmis';
+    return 'Acik';
+  }
+
+  function updateControlPageButtons(activePage) {
+    document.querySelectorAll('.control-page-btn').forEach(btn => {
+      const idx = parseInt(btn.dataset.page, 10);
+      btn.classList.toggle('active', idx === activePage);
+    });
+  }
+
+  function showControlMsg(msg, isSuccess) {
+    if (!controlStatusMsg) return;
+    controlStatusMsg.innerText = msg;
+    controlStatusMsg.className = isSuccess ? 'update-status-ok' : 'update-status-fail';
+    controlStatusMsg.style.display = 'block';
+    setTimeout(() => { controlStatusMsg.style.display = 'none'; }, 2500);
+  }
+
+  async function refreshControlStatus() {
+    if (!controlStatusBox) return;
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        controlStatusBox.innerText = 'Durum alinamadi';
+        return;
+      }
+      const wifiText = data.wifi === 'connected' ? 'Bagli' : 'Bagli degil';
+      controlStatusBox.innerHTML =
+        '<div><b>Ekran:</b> ' + screenLabel(data.screen) + '</div>' +
+        '<div><b>Sekme:</b> ' + (data.pageName || '-') + ' (' + (data.page + 1) + '/4)</div>' +
+        '<div><b>Wi-Fi:</b> ' + wifiText + '</div>';
+      updateControlPageButtons(data.page);
+    } catch (e) {
+      controlStatusBox.innerText = 'Baglanti hatasi';
+    }
+  }
+
+  async function sendControl(action, pageIndex) {
+    const body = { action };
+    if (pageIndex !== undefined) body.index = pageIndex;
+    try {
+      const res = await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) {}
+      if (res.ok && data.ok) {
+        showControlMsg('Komut gonderildi', true);
+        refreshControlStatus();
+      } else {
+        showControlMsg(data.error || 'Komut basarisiz', false);
+      }
+    } catch (e) {
+      showControlMsg('Baglanti hatasi', false);
+    }
+  }
+
+  document.querySelectorAll('.control-action-btn').forEach(btn => {
+    btn.addEventListener('click', () => sendControl(btn.dataset.action));
+  });
+  document.querySelectorAll('.control-page-btn').forEach(btn => {
+    btn.addEventListener('click', () => sendControl('page', parseInt(btn.dataset.page, 10)));
+  });
+
+  refreshControlStatus();
+  controlPollTimer = setInterval(refreshControlStatus, 3000);
+  document.querySelector('[data-tab="tab-control"]')?.addEventListener('click', refreshControlStatus);
+
 </script>
 </body></html>)=====";
 
@@ -1257,11 +1456,311 @@ static void handleSave() {
   server.send(303, "text/plain", "");
 }
 
+static void exportPutStringKey(JsonObject &settings, const char *key) {
+  settings[key] = prefs.getString(key, "");
+}
+
+static void exportSettingsObject(JsonObject &settings) {
+  const char *stringKeys[] = {
+      "accent",       "bg",           "text",         "notes",
+      "nickname",     "locname",      "units",        "region",
+      "calUrl",       "spotifyUrl",   "githubUser",   "steamKey",
+      "steamId",      "qbUrl",        "qbUser",       "qbPass",
+      "octoUrl",      "octoKey",      "haUrl",        "haToken",
+      "haEntityId",   "wifiSsid",     "wifiPass",     nullptr};
+  for (int i = 0; stringKeys[i]; i++)
+    exportPutStringKey(settings, stringKeys[i]);
+
+  settings["lat"] = prefs.getFloat("lat", 52.5200f);
+  settings["lng"] = prefs.getFloat("lng", 13.4050f);
+  settings["sleepMin"] = prefs.getInt("sleepMin", 10);
+  settings["w_cnt"] = prefs.getInt("w_cnt", 0);
+  settings["w_goal"] = prefs.getInt("w_goal", 8);
+  settings["w_day"] = prefs.getInt("w_day", -1);
+  settings["flashMode"] = prefs.getBool("flashMode", false);
+  settings["wifiEnabled"] = prefs.getBool("wifiEnabled", true);
+  if (prefs.isKey("bl"))
+    settings["bl"] = prefs.getInt("bl", 200);
+
+  char keyBuf[20];
+  for (int p = 0; p < 3; p++) {
+    snprintf(keyBuf, sizeof(keyBuf), "t_name%d", p);
+    exportPutStringKey(settings, keyBuf);
+    snprintf(keyBuf, sizeof(keyBuf), "t_lay%d", p);
+    settings[keyBuf] = prefs.getInt(keyBuf, 0);
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      snprintf(keyBuf, sizeof(keyBuf), "t%dslot%d", p, i);
+      exportPutStringKey(settings, keyBuf);
+      snprintf(keyBuf, sizeof(keyBuf), "t%dslot%d_lbl", p, i);
+      exportPutStringKey(settings, keyBuf);
+      snprintf(keyBuf, sizeof(keyBuf), "t%dslot%d_ent", p, i);
+      exportPutStringKey(settings, keyBuf);
+    }
+  }
+  for (int i = 0; i < 6; i++) {
+    snprintf(keyBuf, sizeof(keyBuf), "timer%d", i);
+    settings[keyBuf] = prefs.getInt(keyBuf, timerPresetMin[i]);
+  }
+}
+
+static void sendJsonError(int code, const char *message) {
+  StaticJsonDocument<192> doc;
+  doc["ok"] = false;
+  doc["error"] = message;
+  String out;
+  serializeJson(doc, out);
+  server.send(code, "application/json", out);
+}
+
+static void importStringSetting(JsonObject &settings, const char *key,
+                                bool asciiFold = false) {
+  if (!settings.containsKey(key))
+    return;
+  const char *raw = settings[key];
+  String val = raw ? raw : "";
+  if (asciiFold)
+    val = asciiFoldTurkishUtf8ToAscii(val);
+  val.trim();
+  prefs.putString(key, val);
+}
+
+static bool importSettingsObject(JsonObject &settings) {
+  importStringSetting(settings, "accent");
+  importStringSetting(settings, "bg");
+  importStringSetting(settings, "text");
+  importStringSetting(settings, "units");
+  importStringSetting(settings, "region");
+  importStringSetting(settings, "calUrl");
+  importStringSetting(settings, "spotifyUrl");
+  importStringSetting(settings, "githubUser");
+  importStringSetting(settings, "steamKey");
+  importStringSetting(settings, "steamId");
+  importStringSetting(settings, "qbUrl");
+  importStringSetting(settings, "qbUser");
+  importStringSetting(settings, "qbPass");
+  importStringSetting(settings, "octoUrl");
+  importStringSetting(settings, "octoKey");
+  importStringSetting(settings, "haUrl");
+  importStringSetting(settings, "haToken");
+  importStringSetting(settings, "haEntityId");
+  importStringSetting(settings, "wifiSsid");
+  importStringSetting(settings, "wifiPass");
+
+  importStringSetting(settings, "notes", true);
+  importStringSetting(settings, "nickname", true);
+  importStringSetting(settings, "locname", true);
+
+  String notes = prefs.getString("notes", "");
+  if (notes.length() == 0)
+    prefs.putString("notes", "Henuz not yok.");
+  else if (notes.length() > 700)
+    prefs.putString("notes", notes.substring(0, 700));
+
+  String nickname = prefs.getString("nickname", "");
+  if (nickname.length() > 24)
+    prefs.putString("nickname", nickname.substring(0, 24));
+
+  String locname = prefs.getString("locname", "");
+  if (locname.length() == 0)
+    prefs.putString("locname", "Unknown");
+
+  String units = prefs.getString("units", "metric");
+  if (units != "metric" && units != "imperial")
+    prefs.putString("units", "metric");
+
+  String region = prefs.getString("region", "europe");
+  if (region != "europe" && region != "us")
+    prefs.putString("region", "europe");
+
+  float lat = settings.containsKey("lat") ? settings["lat"].as<float>()
+                                          : prefs.getFloat("lat", 52.52f);
+  float lng = settings.containsKey("lng") ? settings["lng"].as<float>()
+                                          : prefs.getFloat("lng", 13.405f);
+  prefs.putFloat("lat", lat);
+  prefs.putFloat("lng", lng);
+
+  int sleepMin = settings.containsKey("sleepMin") ? settings["sleepMin"].as<int>()
+                                                    : prefs.getInt("sleepMin", 10);
+  prefs.putInt("sleepMin", constrain(sleepMin, 0, 120));
+
+  if (settings.containsKey("w_cnt"))
+    prefs.putInt("w_cnt", settings["w_cnt"].as<int>());
+  if (settings.containsKey("w_goal")) {
+    int goal = settings["w_goal"].as<int>();
+    if (goal <= 0)
+      goal = 8;
+    prefs.putInt("w_goal", goal);
+  }
+  if (settings.containsKey("w_day"))
+    prefs.putInt("w_day", settings["w_day"].as<int>());
+
+  if (settings.containsKey("flashMode"))
+    prefs.putBool("flashMode", settings["flashMode"].as<bool>());
+  if (settings.containsKey("wifiEnabled"))
+    prefs.putBool("wifiEnabled", settings["wifiEnabled"].as<bool>());
+  if (settings.containsKey("bl"))
+    prefs.putInt("bl", constrain(settings["bl"].as<int>(), 0, 255));
+
+  char keyBuf[24];
+  for (int p = 0; p < 3; p++) {
+    snprintf(keyBuf, sizeof(keyBuf), "t_name%d", p);
+    if (settings.containsKey(keyBuf)) {
+      String name = settings[keyBuf].as<const char *>();
+      name = asciiFoldTurkishUtf8ToAscii(name);
+      name.trim();
+      if (name.length() == 0)
+        name = "Sekme" + String(p + 1);
+      if (name.length() > 6)
+        name = name.substring(0, 6);
+      prefs.putString(keyBuf, name);
+    }
+
+    snprintf(keyBuf, sizeof(keyBuf), "t_lay%d", p);
+    if (settings.containsKey(keyBuf)) {
+      int lay = constrain(settings[keyBuf].as<int>(), 0, 3);
+      prefs.putInt(keyBuf, lay);
+    }
+
+    for (int i = 0; i < HOME_SLOT_COUNT; i++) {
+      snprintf(keyBuf, sizeof(keyBuf), "t%dslot%d", p, i);
+      if (settings.containsKey(keyBuf)) {
+        String widgetKey = settings[keyBuf].as<const char *>();
+        widgetKey.trim();
+        HomeWidgetType widget = homeWidgetFromKey(widgetKey);
+        prefs.putString(keyBuf, homeWidgetKey(widget));
+      }
+      snprintf(keyBuf, sizeof(keyBuf), "t%dslot%d_lbl", p, i);
+      importStringSetting(settings, keyBuf, true);
+      snprintf(keyBuf, sizeof(keyBuf), "t%dslot%d_ent", p, i);
+      importStringSetting(settings, keyBuf);
+    }
+  }
+
+  for (int i = 0; i < 6; i++) {
+    snprintf(keyBuf, sizeof(keyBuf), "timer%d", i);
+    if (settings.containsKey(keyBuf)) {
+      int minutes = sanitizeTimerMinutes(settings[keyBuf].as<int>());
+      prefs.putInt(keyBuf, minutes);
+    }
+  }
+
+  return true;
+}
+
+static void handleExport() {
+  DynamicJsonDocument doc(12288);
+  doc["deskbuddy_backup"] = 1;
+  doc["firmware"] = FIRMWARE_VERSION;
+  JsonObject settings = doc.createNestedObject("settings");
+  exportSettingsObject(settings);
+
+  String out;
+  out.reserve(4096);
+  if (serializeJson(doc, out) == 0) {
+    sendJsonError(500, "JSON olusturulamadi");
+    return;
+  }
+
+  server.sendHeader("Content-Disposition",
+                    "attachment; filename=\"deskbuddy-backup.json\"");
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json; charset=utf-8", out);
+}
+
+static void handleImport() {
+  if (!server.hasArg("plain")) {
+    sendJsonError(400, "JSON govdesi gerekli");
+    return;
+  }
+
+  const String &body = server.arg("plain");
+  if (body.length() < 10 || body.length() > 16384) {
+    sendJsonError(400, "Gecersiz yedek boyutu");
+    return;
+  }
+
+  DynamicJsonDocument doc(12288);
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    sendJsonError(400, "JSON okunamadi");
+    return;
+  }
+
+  if (!doc["deskbuddy_backup"].is<int>() || doc["deskbuddy_backup"].as<int>() != 1) {
+    sendJsonError(400, "Gecersiz yedek dosyasi");
+    return;
+  }
+
+  JsonObject settings = doc["settings"];
+  if (!settings.is<JsonObject>()) {
+    sendJsonError(400, "settings alani eksik");
+    return;
+  }
+
+  if (!importSettingsObject(settings)) {
+    sendJsonError(500, "Yedek uygulanamadi");
+    return;
+  }
+
+  StaticJsonDocument<160> okDoc;
+  okDoc["ok"] = true;
+  okDoc["message"] = "Yedek yuklendi. Cihaz yeniden baslatiliyor...";
+  String out;
+  serializeJson(okDoc, out);
+  server.send(200, "application/json", out);
+  delay(400);
+  ESP.restart();
+}
+
+static void handleApiStatus() {
+  String out;
+  buildRemoteStatusJson(out);
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json; charset=utf-8", out);
+}
+
+static void handleApiControl() {
+  if (!server.hasArg("plain")) {
+    sendJsonError(400, "JSON gerekli");
+    return;
+  }
+
+  const String &body = server.arg("plain");
+  if (body.length() > 512) {
+    sendJsonError(400, "Gecersiz istek");
+    return;
+  }
+
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    sendJsonError(400, "JSON okunamadi");
+    return;
+  }
+
+  const char *action = doc["action"] | "";
+  int pageIndex = doc["index"] | -1;
+  if (!applyRemoteControl(String(action), pageIndex)) {
+    sendJsonError(400, "Komut uygulanamadi");
+    return;
+  }
+
+  StaticJsonDocument<64> okDoc;
+  okDoc["ok"] = true;
+  String out;
+  serializeJson(okDoc, out);
+  server.send(200, "application/json", out);
+}
+
 } // namespace
 
 void setupWebServer() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save", HTTP_POST, handleSave);
+  server.on("/export", HTTP_GET, handleExport);
+  server.on("/import", HTTP_POST, handleImport);
+  server.on("/api/status", HTTP_GET, handleApiStatus);
+  server.on("/api/control", HTTP_POST, handleApiControl);
   
   // Local web upload OTA handler
   server.on("/update", HTTP_POST, []() {

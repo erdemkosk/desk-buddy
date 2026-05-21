@@ -31,6 +31,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPUpdate.h>
+#include <ESPmDNS.h>
 #include <XPT2046_Touchscreen.h>
 #include <math.h>
 #include <stdio.h>
@@ -509,6 +510,10 @@ bool timerDoneDialogOpen = false;
 unsigned long timerDoneDialogStartedMs = 0;
 /** Wi-Fi NVS kaydini silmeden once onay kutusu */
 bool wifiForgetConfirmOpen = false;
+/** Grid hava widget detay overlay */
+bool weatherDetailOpen = false;
+HomeWidgetType weatherDetailWidget = HOME_WIDGET_HUMIDITY;
+String cacheWeatherDetail = "";
 const unsigned long TIMER_DONE_DIALOG_MS = 60UL * 1000UL;
 bool flashModeEnabled = false;
 int timerPresetMin[6] = {1, 5, 10, 15, 25, 30};
@@ -620,6 +625,34 @@ static String ipText() {
   if (!wifiEnabled || WiFi.status() != WL_CONNECTED)
     return "-";
   return WiFi.localIP().toString();
+}
+
+static String mdnsHostLabel() {
+  return String(DESKBUDDY_MDNS_HOSTNAME) + ".local";
+}
+
+static bool mdnsActive = false;
+
+void stopMdns() {
+  if (!mdnsActive)
+    return;
+  MDNS.end();
+  mdnsActive = false;
+}
+
+void ensureMdns() {
+  if (!wifiEnabled || WiFi.status() != WL_CONNECTED) {
+    stopMdns();
+    return;
+  }
+  if (mdnsActive)
+    return;
+  if (MDNS.begin(DESKBUDDY_MDNS_HOSTNAME)) {
+    mdnsActive = true;
+    Serial.printf("[mDNS] http://%s.local\n", DESKBUDDY_MDNS_HOSTNAME);
+  } else {
+    Serial.println("[mDNS] begin failed");
+  }
 }
 
 // --- Saat / tarih yazimi ---
@@ -793,6 +826,49 @@ static String uvLevelText() {
   if (uvIndex < 11.0f)
     return "Cok yuksek";
   return "Asiri";
+}
+
+static bool isWeatherWidget(HomeWidgetType type) {
+  switch (type) {
+  case HOME_WIDGET_HUMIDITY:
+  case HOME_WIDGET_RAIN:
+  case HOME_WIDGET_OUTDOOR:
+  case HOME_WIDGET_KP:
+  case HOME_WIDGET_UV:
+  case HOME_WIDGET_WIND:
+  case HOME_WIDGET_SUN:
+    return true;
+  default:
+    return false;
+  }
+}
+
+void openWeatherDetail(HomeWidgetType type) {
+  if (focusMenuOpen || timerDoneDialogOpen || wifiForgetConfirmOpen)
+    return;
+  if (!isWeatherWidget(type))
+    return;
+  weatherDetailOpen = true;
+  weatherDetailWidget = type;
+  cacheWeatherDetail = "";
+  pageDirty = true;
+}
+
+void closeWeatherDetail() {
+  if (!weatherDetailOpen)
+    return;
+  weatherDetailOpen = false;
+  cacheWeatherDetail = "";
+  pageDirty = true;
+}
+
+bool handleWeatherDetailTouch(int x, int y) {
+  (void)x;
+  (void)y;
+  if (!weatherDetailOpen)
+    return false;
+  closeWeatherDetail();
+  return true;
 }
 
 /** Ana sayfa slotu dar (108px); birim icin rakamin yaninda kucuk "TL" yazisi.
@@ -1221,7 +1297,8 @@ void enterManualSleepFull() {
 }
 
 void handleAutoSleep() {
-  if (focusMenuOpen || timerDoneDialogOpen || wifiForgetConfirmOpen)
+  if (focusMenuOpen || timerDoneDialogOpen || wifiForgetConfirmOpen ||
+      weatherDetailOpen)
     return;
   if (sleepIntervalMin <= 0)
     return;
@@ -1236,6 +1313,72 @@ void handleAutoSleep() {
   // Otomatik modda sadece parlaklik kisilir; tam siyah uyku yalnizca ay
   // dugmesiyle. Eski: idle sonrasi enterSleepOff → dokunmatik bazen tepki
   // vermiyordu / donmus gibi.
+}
+
+bool applyRemoteControl(const String &action, int pageIndex) {
+  if (otaUpdateActive)
+    return false;
+
+  if (action == "wake") {
+    wakeDisplay(true);
+    return true;
+  }
+
+  if (action == "dim") {
+    if (sleepOff)
+      wakeDisplay(false);
+    manualDimMode = true;
+    sleepDimmed = true;
+    sleepOff = false;
+    setBacklight(BL_DIM);
+    lastInteractionMs = millis();
+    pageDirty = true;
+    touchResetGate();
+    return true;
+  }
+
+  if (action == "sleep") {
+    enterManualSleepFull();
+    return true;
+  }
+
+  if (action == "page") {
+    if (pageIndex < 0 || pageIndex > 3)
+      return false;
+    closeWeatherDetail();
+    focusMenuOpen = false;
+    cacheTimerMenu = "";
+    if (sleepOff || sleepDimmed)
+      wakeDisplay(true);
+    Page newPage = (Page)pageIndex;
+    if (newPage != currentPage) {
+      currentPage = newPage;
+      pageDirty = true;
+    }
+    lastInteractionMs = millis();
+    return true;
+  }
+
+  return false;
+}
+
+void buildRemoteStatusJson(String &out) {
+  StaticJsonDocument<384> doc;
+  doc["ok"] = true;
+  doc["sleepOff"] = sleepOff;
+  doc["sleepDimmed"] = sleepDimmed;
+  doc["manualDim"] = manualDimMode;
+  doc["page"] = (int)currentPage;
+  doc["pageName"] = tabNames[(int)currentPage];
+  doc["wifi"] =
+      (wifiEnabled && WiFi.status() == WL_CONNECTED) ? "connected" : "offline";
+  if (sleepOff)
+    doc["screen"] = "off";
+  else if (sleepDimmed)
+    doc["screen"] = "dim";
+  else
+    doc["screen"] = "on";
+  serializeJson(doc, out);
 }
 
 // =========================================================
@@ -2714,6 +2857,7 @@ static void dismissWifiForgetConfirm() {
 void openWifiForgetConfirm() {
   focusMenuOpen = false;
   cacheTimerMenu = "";
+  closeWeatherDetail();
   wifiForgetConfirmOpen = true;
   pageDirty = true;
 }
@@ -4462,6 +4606,248 @@ void drawGridSlotWidget(int pageIdx, int slot, bool force = false) {
 
 
 
+static String weatherConditionLabel() {
+  switch (wxKindFromCode(weatherCode, weatherIsDay)) {
+  case WX_CLEAR_DAY:
+    return "Acik (gunduz)";
+  case WX_CLEAR_NIGHT:
+    return "Acik (gece)";
+  case WX_PARTLY:
+    return "Parcali bulutlu";
+  case WX_CLOUD:
+    return "Bulutlu";
+  case WX_FOG:
+    return "Sisli";
+  case WX_DRIZZLE:
+    return "Cisenti";
+  case WX_RAIN:
+    return "Yagmurlu";
+  case WX_SNOW:
+    return "Karli";
+  case WX_SHOWER:
+    return "Sagaenk yagmur";
+  case WX_THUNDER:
+    return "Gok gurultulu";
+  default:
+    return "Durum bilinmiyor";
+  }
+}
+
+static String humidityComfortText() {
+  if (isnan(humidityPct))
+    return "--";
+  if (humidityPct < 30.0f)
+    return "Kuru";
+  if (humidityPct <= 60.0f)
+    return "Rahat";
+  if (humidityPct <= 75.0f)
+    return "Yuksek nem";
+  return "Cok nemli";
+}
+
+static String weatherDetailCacheKey() {
+  String k = String((int)weatherDetailWidget) + "|" + String(COL_ACCENT) +
+               "|" + locationName + "|" + lastSyncText() + "|";
+  switch (weatherDetailWidget) {
+  case HOME_WIDGET_OUTDOOR:
+    k += outdoorTileCacheKey();
+    break;
+  case HOME_WIDGET_HUMIDITY:
+    k += humidityText() + "|" + humidityComfortText();
+    break;
+  case HOME_WIDGET_RAIN:
+    k += rainText();
+    break;
+  case HOME_WIDGET_UV:
+    k += uvText() + "|" + uvLevelText();
+    break;
+  case HOME_WIDGET_WIND:
+    k += windText() + "|" + windDirectionText();
+    break;
+  case HOME_WIDGET_SUN:
+    k += nextSunLabel() + "|" + nextSunTimeText() + "|" +
+         formatMinuteOfDay(sunriseMin) + "|" + formatMinuteOfDay(sunsetMin);
+    break;
+  case HOME_WIDGET_KP:
+    k += kpText() + "|" + kpLevelText();
+    break;
+  default:
+    break;
+  }
+  return k;
+}
+
+static void drawWeatherDetailHintLine(int y, const String &text) {
+  tft.setTextColor(COL_DIM, COL_PANEL_ALT);
+  tft.drawString(text, WEATHER_DETAIL_X + 14, y, 2);
+}
+
+static void drawWeatherDetailAccentLine(int y, const String &text) {
+  tft.setTextColor(COL_ACCENT, COL_PANEL_ALT);
+  tft.drawString(text, WEATHER_DETAIL_X + 14, y, 2);
+}
+
+void drawWeatherDetailOverlay(bool force = false) {
+  if (!weatherDetailOpen)
+    return;
+
+  String cacheKey = weatherDetailCacheKey();
+  if (!force && cacheKey == cacheWeatherDetail)
+    return;
+  cacheWeatherDetail = cacheKey;
+
+  tft.fillRect(0, 0, SCREEN_W, SCREEN_H, COL_BG);
+  tft.fillRoundRect(WEATHER_DETAIL_X, WEATHER_DETAIL_Y, WEATHER_DETAIL_W,
+                    WEATHER_DETAIL_H, 12, COL_PANEL_ALT);
+  tft.drawRoundRect(WEATHER_DETAIL_X, WEATHER_DETAIL_Y, WEATHER_DETAIL_W,
+                    WEATHER_DETAIL_H, 12, COL_ACCENT);
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+  tft.drawString(homeWidgetLabel(weatherDetailWidget), WEATHER_DETAIL_X + 14,
+                 WEATHER_DETAIL_Y + 12, 2);
+
+  const int bodyTop = WEATHER_DETAIL_Y + 46;
+  const bool online = wifiEnabled && WiFi.status() == WL_CONNECTED;
+
+  switch (weatherDetailWidget) {
+  case HOME_WIDGET_OUTDOOR: {
+    if (!online || isnan(tempC)) {
+      drawWeatherDetailHintLine(bodyTop + 20, "Veri yok");
+      drawWeatherDetailHintLine(bodyTop + 44, "Wi-Fi ve konum kontrol et");
+      break;
+    }
+    WxKind wk = wxKindFromCode(weatherCode, weatherIsDay);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+    tft.drawString(tempText(), WEATHER_DETAIL_X + WEATHER_DETAIL_W / 2 - 16,
+                 bodyTop + 28, 4);
+    tft.setTextDatum(TL_DATUM);
+    drawWxConditionIcon(tft, WEATHER_DETAIL_X + WEATHER_DETAIL_W - 38,
+                        WEATHER_DETAIL_Y + 72, wk, COL_ACCENT, COL_DIM,
+                        COL_PANEL_ALT);
+    drawWeatherDetailAccentLine(bodyTop + 56, tempRangeInline());
+    drawWeatherDetailHintLine(bodyTop + 78, weatherConditionLabel());
+    drawWeatherDetailHintLine(bodyTop + 100, locationName);
+    break;
+  }
+  case HOME_WIDGET_HUMIDITY: {
+    if (!online || isnan(humidityPct)) {
+      drawWeatherDetailHintLine(bodyTop + 20, "Veri yok");
+      break;
+    }
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+    tft.drawString(humidityText(), WEATHER_DETAIL_X + WEATHER_DETAIL_W / 2,
+                   bodyTop + 24, 4);
+    tft.setTextDatum(TL_DATUM);
+    drawWeatherDetailAccentLine(bodyTop + 58, "Konfor: " + humidityComfortText());
+    if (!isnan(tempC))
+      drawWeatherDetailHintLine(bodyTop + 82, "Sicaklik: " + tempText());
+    drawWeatherDetailHintLine(bodyTop + 104, locationName);
+    break;
+  }
+  case HOME_WIDGET_RAIN: {
+    if (!online || isnan(precipMm)) {
+      drawWeatherDetailHintLine(bodyTop + 20, "Veri yok");
+      break;
+    }
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+    tft.drawString(rainText(), WEATHER_DETAIL_X + WEATHER_DETAIL_W / 2,
+                   bodyTop + 24, 4);
+    tft.setTextDatum(TL_DATUM);
+    drawWeatherDetailHintLine(bodyTop + 58, "Bu saatlik yagis");
+    drawWeatherDetailHintLine(bodyTop + 82, weatherConditionLabel());
+    drawWeatherDetailHintLine(bodyTop + 104, locationName);
+    break;
+  }
+  case HOME_WIDGET_UV: {
+    if (!online || isnan(uvIndex)) {
+      drawWeatherDetailHintLine(bodyTop + 20, "Veri yok");
+      break;
+    }
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+    tft.drawString(uvText(), WEATHER_DETAIL_X + WEATHER_DETAIL_W / 2,
+                   bodyTop + 24, 4);
+    tft.setTextDatum(TL_DATUM);
+    drawWeatherDetailAccentLine(bodyTop + 58, "Seviye: " + uvLevelText());
+    if (uvIndex >= 6.0f)
+      drawWeatherDetailHintLine(bodyTop + 82, "Gunes koruyucu onerilir");
+    else
+      drawWeatherDetailHintLine(bodyTop + 82, "Disari cikmak icin uygun");
+    drawWeatherDetailHintLine(bodyTop + 104, locationName);
+    break;
+  }
+  case HOME_WIDGET_WIND: {
+    if (!online || isnan(windSpeedMs)) {
+      drawWeatherDetailHintLine(bodyTop + 20, "Veri yok");
+      break;
+    }
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+    tft.drawString(windText(), WEATHER_DETAIL_X + WEATHER_DETAIL_W / 2,
+                   bodyTop + 24, 4);
+    tft.setTextDatum(TL_DATUM);
+    drawWeatherDetailAccentLine(bodyTop + 58, windDirectionText());
+    drawWeatherDetailHintLine(bodyTop + 82, "Anlik ruzgar hizi");
+    drawWeatherDetailHintLine(bodyTop + 104, locationName);
+    break;
+  }
+  case HOME_WIDGET_SUN: {
+    if (sunriseMin < 0 || sunsetMin < 0) {
+      drawWeatherDetailHintLine(bodyTop + 20, "Veri yok");
+      break;
+    }
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+    tft.drawString(nextSunTimeText(), WEATHER_DETAIL_X + WEATHER_DETAIL_W / 2,
+                   bodyTop + 24, 4);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(COL_DIM, COL_PANEL_ALT);
+    tft.drawString(nextSunLabel(), WEATHER_DETAIL_X + 14, bodyTop + 4, 2);
+    drawWeatherDetailAccentLine(bodyTop + 58,
+                                "Dogus: " + formatMinuteOfDay(sunriseMin));
+    drawWeatherDetailAccentLine(bodyTop + 80,
+                                "Batim: " + formatMinuteOfDay(sunsetMin));
+    drawWeatherDetailHintLine(bodyTop + 104, locationName);
+    break;
+  }
+  case HOME_WIDGET_KP: {
+    if (!online || isnan(kpIndex)) {
+      drawWeatherDetailHintLine(bodyTop + 20, "Veri yok");
+      break;
+    }
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(COL_TEXT, COL_PANEL_ALT);
+    tft.drawString(String(kpIndex, 1), WEATHER_DETAIL_X + WEATHER_DETAIL_W / 2,
+                   bodyTop + 24, 4);
+    tft.setTextDatum(TL_DATUM);
+    drawWeatherDetailAccentLine(bodyTop + 58, "Seviye: " + kpLevelText());
+    drawWeatherDetailHintLine(bodyTop + 82, "Jeomanyetik aktivite");
+    if (kpIndex >= 5.0f)
+      drawWeatherDetailHintLine(bodyTop + 104, "Yuksek aktivite olabilir");
+    else
+      drawWeatherDetailHintLine(bodyTop + 104, "Normal aralik");
+    break;
+  }
+  default:
+    drawWeatherDetailHintLine(bodyTop + 20, "Veri yok");
+    break;
+  }
+
+  if (online)
+    drawWeatherDetailHintLine(WEATHER_DETAIL_Y + WEATHER_DETAIL_H - 36,
+                              lastSyncText());
+
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_DIM, COL_PANEL_ALT);
+  tft.drawString("Dokunarak kapat", WEATHER_DETAIL_X + WEATHER_DETAIL_W / 2,
+                 WEATHER_DETAIL_Y + WEATHER_DETAIL_H - 14, 1);
+  tft.setTextDatum(TL_DATUM);
+}
+
 void drawFocusMenuOverlay(bool force = false) {
   String combined = String(focusTimerRunning ? 1 : 0) + "|" +
                     String(focusTimerFinished ? 1 : 0) + "|" +
@@ -4599,6 +4985,8 @@ void drawGridPageFull(int pageIdx) {
   }
   if (focusMenuOpen)
     drawFocusMenuOverlay(true);
+  if (weatherDetailOpen)
+    drawWeatherDetailOverlay(true);
   if (timerDoneDialogOpen)
     drawTimerDoneOverlay(true);
 }
@@ -4611,6 +4999,11 @@ void updateGridDynamic(int pageIdx) {
 
   if (focusMenuOpen) {
     drawFocusMenuOverlay(false);
+    return;
+  }
+
+  if (weatherDetailOpen) {
+    drawWeatherDetailOverlay(false);
     return;
   }
 
@@ -4812,13 +5205,21 @@ void updateStatusDynamic() {
   }
 
   String ip = ipText();
-  if (ip != lastIpText) {
-    tft.fillRect(18, PAGE_ROW2_Y + 30, 200, 18, COL_PANEL);
+  String webPanelCombined = mdnsHostLabel() + "|" + ip;
+  if (webPanelCombined != lastIpText) {
+    tft.fillRect(18, PAGE_ROW2_Y + 24, 200, 38, COL_PANEL);
     tft.setTextColor(COL_DIM, COL_PANEL);
-    tft.drawString("IP adresi", 18, PAGE_ROW2_Y + 8, 2);
-    tft.setTextColor(COL_TEXT, COL_PANEL);
-    tft.drawString(ip, 18, PAGE_ROW2_Y + 30, 2);
-    lastIpText = ip;
+    tft.drawString("Web paneli", 18, PAGE_ROW2_Y + 8, 2);
+    if (ip == "-") {
+      tft.setTextColor(COL_TEXT, COL_PANEL);
+      tft.drawString("-", 18, PAGE_ROW2_Y + 30, 2);
+    } else {
+      tft.setTextColor(COL_ACCENT, COL_PANEL);
+      tft.drawString(mdnsHostLabel(), 18, PAGE_ROW2_Y + 28, 2);
+      tft.setTextColor(COL_DIM, COL_PANEL);
+      tft.drawString(ip, 18, PAGE_ROW2_Y + 48, 1);
+    }
+    lastIpText = webPanelCombined;
   }
 
   String up = uptimeText();
@@ -4871,6 +5272,8 @@ void drawCurrentPageFull() {
 
   if (focusMenuOpen && currentPage < 3 && (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6))
     drawFocusMenuOverlay(true);
+  if (weatherDetailOpen && currentPage < 3 && (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6))
+    drawWeatherDetailOverlay(true);
   if (timerDoneDialogOpen)
     drawTimerDoneOverlay(true);
   if (wifiForgetConfirmOpen)
@@ -4890,6 +5293,11 @@ void updateCurrentPageDynamic() {
 
   if (focusMenuOpen && currentPage < 3 && (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6)) {
     drawFocusMenuOverlay(false);
+    return;
+  }
+
+  if (weatherDetailOpen && currentPage < 3 && (pageLayouts[(int)currentPage] == LAYOUT_GRID || pageLayouts[(int)currentPage] == LAYOUT_GRID_6)) {
+    drawWeatherDetailOverlay(false);
     return;
   }
 
@@ -4966,41 +5374,45 @@ bool handleGridTouch(int pageIdx, int x, int y) {
     getHomeSlotRect(pageIdx, slot, slotX, slotY, slotW, slotH);
     if (slotY < 0) continue; // Skip invalid slots (unused slots in 4-widget layout)
 
-    if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_TIMER) {
-      if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
-        if (focusTimerFinished) {
-          resetFocusTimer();
-        } else {
-          focusMenuOpen = true;
-          cacheFocusTimer = "";
-          clearHomeSlotCaches();
-          cacheTimerMenu = "";
-        }
-        pageDirty = true;
-        return true;
+    if (x < slotX || x >= slotX + slotW || y < slotY || y >= slotY + slotH)
+      continue;
+
+    HomeWidgetType wtype = pageWidgetSlots[pageIdx][slot];
+
+    if (wtype == HOME_WIDGET_TIMER) {
+      if (focusTimerFinished) {
+        resetFocusTimer();
+      } else {
+        closeWeatherDetail();
+        focusMenuOpen = true;
+        cacheFocusTimer = "";
+        clearHomeSlotCaches();
+        cacheTimerMenu = "";
       }
-    } else if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_WATER) {
-      if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
-        if (x < slotX + slotW / 2) {
-          if (waterCount > 0) waterCount--;
-        } else {
-          waterCount++;
-          // No confetti - just accent border via goalReached
-        }
-        prefs.putInt("w_cnt", waterCount);
-        cachePageWidgets[pageIdx][slot] = "";
-        pageDirty = true;
-        return true;
+      pageDirty = true;
+      return true;
+    }
+    if (wtype == HOME_WIDGET_WATER) {
+      if (x < slotX + slotW / 2) {
+        if (waterCount > 0) waterCount--;
+      } else {
+        waterCount++;
       }
-    } else if (pageWidgetSlots[pageIdx][slot] == HOME_WIDGET_HA) {
-      if (x >= slotX && x < slotX + slotW && y >= slotY && y < slotY + slotH) {
-        pageHaStates[pageIdx][slot] = !pageHaStates[pageIdx][slot];
-        cachePageWidgets[pageIdx][slot] = "";
-        pageDirty = true;
-        
-        toggleHomeAssistant(pageHaEntities[pageIdx][slot]);
-        return true;
-      }
+      prefs.putInt("w_cnt", waterCount);
+      cachePageWidgets[pageIdx][slot] = "";
+      pageDirty = true;
+      return true;
+    }
+    if (wtype == HOME_WIDGET_HA) {
+      pageHaStates[pageIdx][slot] = !pageHaStates[pageIdx][slot];
+      cachePageWidgets[pageIdx][slot] = "";
+      pageDirty = true;
+      toggleHomeAssistant(pageHaEntities[pageIdx][slot]);
+      return true;
+    }
+    if (isWeatherWidget(wtype)) {
+      openWeatherDetail(wtype);
+      return true;
     }
   }
 
@@ -5054,6 +5466,7 @@ void handleNavTouch(int x, int y) {
 
   Page newPage = (Page)idx;
   if (newPage != currentPage) {
+    closeWeatherDetail();
     currentPage = newPage;
     pageDirty = true;
   }
@@ -5103,6 +5516,10 @@ void connectWiFi(bool waitForConnection = true) {
     delay(200);
   }
   wifiConnectInProgress = false;
+  if (WiFi.status() == WL_CONNECTED)
+    ensureMdns();
+  else
+    stopMdns();
 }
 
 void updateWiFiConnectionState() {
@@ -5112,6 +5529,7 @@ void updateWiFiConnectionState() {
   wl_status_t status = WiFi.status();
   if (status == WL_CONNECTED) {
     wifiConnectInProgress = false;
+    ensureMdns();
     ensureSunTimesForToday();
     ensureWeather();
     if (isWidgetActive(HOME_WIDGET_KP))
@@ -5134,6 +5552,7 @@ void setWifiEnabled(bool enabled) {
   prefs.putBool("wifiEnabled", wifiEnabled);
 
   if (!wifiEnabled) {
+    stopMdns();
     wifiConnectInProgress = false;
     WiFi.disconnect(true, true);
     WiFi.mode(WIFI_OFF);
@@ -5426,8 +5845,11 @@ void setup() {
   lastClockTick = millis();
   lastDataTick = millis();
 
-  Serial.print("Deskbuddy web: http://");
-  Serial.println(WiFi.localIP());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("Deskbuddy web: http://%s.local  http://%s\n",
+                  DESKBUDDY_MDNS_HOSTNAME,
+                  WiFi.localIP().toString().c_str());
+  }
 }
 
 static bool wasMeetingFlashing = false;
@@ -5594,6 +6016,10 @@ void loop() {
       return;
     }
 
+    if (handleWeatherDetailTouch(tx, ty)) {
+      return;
+    }
+
     const int bxUpdate = topBarUpdateBtnX();
     const int bxWifi = topBarWifiForgetBtnX();
     const int bxDim = topBarDimBtnX();
@@ -5665,7 +6091,7 @@ void loop() {
   }
 
   if (currentPage < 3 && (pageLayouts[currentPage] == LAYOUT_GRID || pageLayouts[currentPage] == LAYOUT_GRID_6) && !focusMenuOpen && !timerDoneDialogOpen &&
-      !wifiForgetConfirmOpen && !sleepOff) {
+      !wifiForgetConfirmOpen && !weatherDetailOpen && !sleepOff) {
     static unsigned long lastBuddyAnimMs = 0;
     bool needsAnim = false;
     int p = (int)currentPage;

@@ -11,5 +11,8 @@
 /** Kurulum soft-AP SSID (QR + WiFi.softAP). */
 inline constexpr const char *DESKBUDDY_SOFTAP_SSID = "Deskbuddy-Setup";
 
+/** STA modunda mDNS hostname (http://deskbuddy.local). */
+inline constexpr const char *DESKBUDDY_MDNS_HOSTNAME = "deskbuddy";
+
 /** Firmware semver; drawTopBar + web */
-inline constexpr const char *FIRMWARE_VERSION = "v2.6.1";
+inline constexpr const char *FIRMWARE_VERSION = "v2.8.0";

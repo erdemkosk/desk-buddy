@@ -38,6 +38,11 @@ constexpr int WIFI_FORGET_DLG_Y = 88;
 constexpr int WIFI_FORGET_DLG_W = 208;
 constexpr int WIFI_FORGET_DLG_H = 144;
 
+constexpr int WEATHER_DETAIL_X = 12;
+constexpr int WEATHER_DETAIL_Y = 48;
+constexpr int WEATHER_DETAIL_W = 216;
+constexpr int WEATHER_DETAIL_H = 218;
+
 constexpr int PAGE_ROW1_Y = 42;
 constexpr int PAGE_ROW2_Y = 120;
 constexpr int PAGE_ROW3_Y = 198;
