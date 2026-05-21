@@ -1514,7 +1514,7 @@ static void sendJsonError(int code, const char *message) {
 
 static void importStringSetting(JsonObject &settings, const char *key,
                                 bool asciiFold = false) {
-  if (!settings.containsKey(key))
+  if (settings[key].isNull())
     return;
   const char *raw = settings[key];
   String val = raw ? raw : "";
@@ -1572,39 +1572,39 @@ static bool importSettingsObject(JsonObject &settings) {
   if (region != "europe" && region != "us")
     prefs.putString("region", "europe");
 
-  float lat = settings.containsKey("lat") ? settings["lat"].as<float>()
-                                          : prefs.getFloat("lat", 52.52f);
-  float lng = settings.containsKey("lng") ? settings["lng"].as<float>()
-                                          : prefs.getFloat("lng", 13.405f);
+  float lat = !settings["lat"].isNull() ? settings["lat"].as<float>()
+                                        : prefs.getFloat("lat", 52.52f);
+  float lng = !settings["lng"].isNull() ? settings["lng"].as<float>()
+                                        : prefs.getFloat("lng", 13.405f);
   prefs.putFloat("lat", lat);
   prefs.putFloat("lng", lng);
 
-  int sleepMin = settings.containsKey("sleepMin") ? settings["sleepMin"].as<int>()
-                                                    : prefs.getInt("sleepMin", 10);
+  int sleepMin = !settings["sleepMin"].isNull() ? settings["sleepMin"].as<int>()
+                                                  : prefs.getInt("sleepMin", 10);
   prefs.putInt("sleepMin", constrain(sleepMin, 0, 120));
 
-  if (settings.containsKey("w_cnt"))
+  if (!settings["w_cnt"].isNull())
     prefs.putInt("w_cnt", settings["w_cnt"].as<int>());
-  if (settings.containsKey("w_goal")) {
+  if (!settings["w_goal"].isNull()) {
     int goal = settings["w_goal"].as<int>();
     if (goal <= 0)
       goal = 8;
     prefs.putInt("w_goal", goal);
   }
-  if (settings.containsKey("w_day"))
+  if (!settings["w_day"].isNull())
     prefs.putInt("w_day", settings["w_day"].as<int>());
 
-  if (settings.containsKey("flashMode"))
+  if (!settings["flashMode"].isNull())
     prefs.putBool("flashMode", settings["flashMode"].as<bool>());
-  if (settings.containsKey("wifiEnabled"))
+  if (!settings["wifiEnabled"].isNull())
     prefs.putBool("wifiEnabled", settings["wifiEnabled"].as<bool>());
-  if (settings.containsKey("bl"))
+  if (!settings["bl"].isNull())
     prefs.putInt("bl", constrain(settings["bl"].as<int>(), 0, 255));
 
   char keyBuf[24];
   for (int p = 0; p < 3; p++) {
     snprintf(keyBuf, sizeof(keyBuf), "t_name%d", p);
-    if (settings.containsKey(keyBuf)) {
+    if (!settings[keyBuf].isNull()) {
       String name = settings[keyBuf].as<const char *>();
       name = asciiFoldTurkishUtf8ToAscii(name);
       name.trim();
@@ -1616,14 +1616,14 @@ static bool importSettingsObject(JsonObject &settings) {
     }
 
     snprintf(keyBuf, sizeof(keyBuf), "t_lay%d", p);
-    if (settings.containsKey(keyBuf)) {
+    if (!settings[keyBuf].isNull()) {
       int lay = constrain(settings[keyBuf].as<int>(), 0, 3);
       prefs.putInt(keyBuf, lay);
     }
 
     for (int i = 0; i < HOME_SLOT_COUNT; i++) {
       snprintf(keyBuf, sizeof(keyBuf), "t%dslot%d", p, i);
-      if (settings.containsKey(keyBuf)) {
+      if (!settings[keyBuf].isNull()) {
         String widgetKey = settings[keyBuf].as<const char *>();
         widgetKey.trim();
         HomeWidgetType widget = homeWidgetFromKey(widgetKey);
@@ -1638,7 +1638,7 @@ static bool importSettingsObject(JsonObject &settings) {
 
   for (int i = 0; i < 6; i++) {
     snprintf(keyBuf, sizeof(keyBuf), "timer%d", i);
-    if (settings.containsKey(keyBuf)) {
+    if (!settings[keyBuf].isNull()) {
       int minutes = sanitizeTimerMinutes(settings[keyBuf].as<int>());
       prefs.putInt(keyBuf, minutes);
     }
@@ -1686,13 +1686,13 @@ static void handleImport() {
     return;
   }
 
-  if (!doc["deskbuddy_backup"].is<int>() || doc["deskbuddy_backup"].as<int>() != 1) {
+  if (doc["deskbuddy_backup"].as<int>() != 1) {
     sendJsonError(400, "Gecersiz yedek dosyasi");
     return;
   }
 
   JsonObject settings = doc["settings"];
-  if (!settings.is<JsonObject>()) {
+  if (settings.isNull()) {
     sendJsonError(400, "settings alani eksik");
     return;
   }
