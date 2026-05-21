@@ -1478,15 +1478,26 @@ void toggleHomeAssistant(String entityId = "") {
   if (WiFi.status() != WL_CONNECTED || haUrl.length() < 10 || entityId.length() < 3)
     return;
 
+  // homeassistant/toggle only works for switch/light etc.
+  // automation.* needs automation/trigger, script.* needs script/turn_on
+  const char *servicePath = "api/services/homeassistant/toggle";
+  if (entityId.indexOf(',') == -1) {
+    if (entityId.startsWith("automation.")) {
+      servicePath = "api/services/automation/trigger";
+    } else if (entityId.startsWith("script.")) {
+      servicePath = "api/services/script/turn_on";
+    }
+  }
+
   String url = haUrl;
   if (!url.endsWith("/")) url += "/";
-  url += "api/services/homeassistant/toggle";
+  url += servicePath;
 
   WiFiClientSecure clientSecure;
   WiFiClient clientPlain;
   HTTPClient http;
   http.setTimeout(5000);
-  
+
   bool success = false;
   if (url.startsWith("https://")) {
     clientSecure.setInsecure();
@@ -1499,7 +1510,7 @@ void toggleHomeAssistant(String entityId = "") {
     Serial.println("[HA] begin failed");
     return;
   }
-  
+
   if (haToken.length() > 5) {
     http.addHeader("Authorization", "Bearer " + haToken);
   }
@@ -1509,7 +1520,7 @@ void toggleHomeAssistant(String entityId = "") {
   if (entityId.indexOf(',') != -1) {
     body = "{\"entity_id\": [";
     String temp = entityId;
-    temp.replace(" ", ""); // Remove spaces
+    temp.replace(" ", "");
     int commaIdx;
     while ((commaIdx = temp.indexOf(',')) != -1) {
       String entity = temp.substring(0, commaIdx);
@@ -1522,9 +1533,10 @@ void toggleHomeAssistant(String entityId = "") {
   }
 
   int code = http.POST(body);
+  Serial.printf("[HA] %s\n", servicePath);
   Serial.printf("[HA] POST body: %s\n", body.c_str());
   Serial.printf("[HA] POST code: %d\n", code);
-  
+
   http.end();
 }
 

@@ -529,7 +529,7 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
       <div class="grid">
         <div style="grid-column: 1/-1;"><label class="label">HA URL (Örn: http://192.168.1.50:8123)</label><input type="text" name="haUrl" value=")=====" + htmlEscape(haUrl) + R"=====("></div>
         <div style="grid-column: 1/-1;"><label class="label">HA Token (Long-Lived Access Token)</label><input type="password" name="haToken" value=")=====" + htmlEscape(haToken) + R"=====("></div>
-        <div style="grid-column: 1/-1;"><label class="label">Varsayılan Entity ID (OctoPrint Uzun Basma - Örn: switch.evde_3d)</label><input type="text" name="haEntityId" value=")=====" + htmlEscape(haEntityId) + R"=====("></div>
+        <div style="grid-column: 1/-1;"><label class="label">Varsayılan Entity ID (OctoPrint Uzun Basma)</label><input type="text" name="haEntityId" placeholder="automation.priz_hepsi_ac_kapa veya script.... veya switch...." value=")=====" + htmlEscape(haEntityId) + R"=====("></div>
       </div>
 
     </div>)=====";
