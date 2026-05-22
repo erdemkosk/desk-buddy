@@ -8,6 +8,8 @@
 #include <WebServer.h>
 #include <Update.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <math.h>
 
 #include "Deskbuddy_config.h"
@@ -274,6 +276,12 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
 .control-page-btn { padding: 14px 10px; border-radius: 10px; border: 1px solid #334155; background: #1f2937; color: #f1f5f9; font-weight: 600; cursor: pointer; font: inherit; }
 .control-page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 .control-page-btn:hover:not(.active) { border-color: var(--accent); }
+.geo-search-row { display: flex; gap: 10px; margin-bottom: 10px; max-width: 420px; }
+.geo-search-row input { flex: 1; min-width: 0; }
+.geo-search-results { display: flex; flex-direction: column; gap: 8px; max-width: 420px; margin-bottom: 14px; }
+.geo-result-btn { text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid #334155; background: #1f2937; color: #e2e8f0; cursor: pointer; font: inherit; font-size: 13px; line-height: 1.4; }
+.geo-result-btn:hover { border-color: var(--accent); background: #111827; }
+.geo-search-hint { font-size: 12px; color: #94b3b8; margin: 0 0 10px; line-height: 1.45; }
 @media(max-width: 800px) {
   .app-container { flex-direction: column; align-items: center; }
   .preview-pane { position: relative; top: 0; width: 100%; max-width: 300px; }
@@ -477,17 +485,24 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
       
       <hr>
       <label class="label">Konum (Hava Durumu ve Güneş için)</label>
+      <p class="geo-search-hint">Sehir ara; enlem ve boylam otomatik dolar. Degisiklikler icin altta <b>Cihaza Kaydet</b> butonuna bas.</p>
+      <div class="geo-search-row">
+        <input type="text" id="geo-search-input" placeholder="Orn: Izmir, Istanbul, Berlin" maxlength="64" autocomplete="off">
+        <button type="button" id="btn-geo-search" class="control-action-btn" style="flex: 0 0 auto; min-width: 72px;">Ara</button>
+      </div>
+      <div id="geo-search-results" class="geo-search-results"></div>
       <div class="grid">
         <div style="grid-column: 1 / -1;">
-          <input type="text" name="locname" value=")=====" + htmlEscape(locationName) + R"=====(" placeholder="Şehir İsmi">
+          <label class="label">Gorunen Isim</label>
+          <input type="text" name="locname" id="input-locname" value=")=====" + htmlEscape(locationName) + R"=====(" placeholder="Sehir ismi">
         </div>
         <div>
           <label class="label">Enlem (Latitude)</label>
-          <input type="text" name="lat" value=")=====" + String(LAT,6) + R"=====(">
+          <input type="text" name="lat" id="input-lat" value=")=====" + String(LAT,6) + R"=====(">
         </div>
         <div>
           <label class="label">Boylam (Longitude)</label>
-          <input type="text" name="lng" value=")=====" + String(LNG,6) + R"=====(">
+          <input type="text" name="lng" id="input-lng" value=")=====" + String(LNG,6) + R"=====(">
         </div>
       </div>
 
@@ -1203,6 +1218,79 @@ hr { border: 0; border-top: 1px solid #2d3748; margin: 20px 0; }
   controlPollTimer = setInterval(refreshControlStatus, 3000);
   document.querySelector('[data-tab="tab-control"]')?.addEventListener('click', refreshControlStatus);
 
+  const geoSearchInput = document.getElementById('geo-search-input');
+  const geoSearchResults = document.getElementById('geo-search-results');
+  const inputLocname = document.getElementById('input-locname');
+  const inputLat = document.getElementById('input-lat');
+  const inputLng = document.getElementById('input-lng');
+
+  function formatGeoLabel(r) {
+    return [r.name, r.admin1, r.country].filter(Boolean).join(', ');
+  }
+
+  function renderGeoResults(results) {
+    if (!geoSearchResults) return;
+    geoSearchResults.innerHTML = '';
+    results.forEach(r => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'geo-result-btn';
+      const label = formatGeoLabel(r);
+      btn.textContent = label + '  (' + Number(r.latitude).toFixed(2) + ', ' + Number(r.longitude).toFixed(2) + ')';
+      btn.addEventListener('click', () => {
+        if (inputLocname) inputLocname.value = r.name || label;
+        if (inputLat) inputLat.value = Number(r.latitude).toFixed(4);
+        if (inputLng) inputLng.value = Number(r.longitude).toFixed(4);
+        geoSearchResults.innerHTML = '<span class="geo-search-hint">Secildi: ' + label + '</span>';
+      });
+      geoSearchResults.appendChild(btn);
+    });
+  }
+
+  async function fetchGeocodeData(query) {
+    const params = new URLSearchParams({
+      name: query,
+      count: '6',
+      language: 'tr',
+      format: 'json'
+    });
+    try {
+      const res = await fetch('https://geocoding-api.open-meteo.com/v1/search?' + params.toString());
+      if (res.ok) return await res.json();
+    } catch (e) {}
+    const proxy = await fetch('/api/geocode?q=' + encodeURIComponent(query));
+    if (!proxy.ok) throw new Error('proxy failed');
+    return await proxy.json();
+  }
+
+  async function searchLocation() {
+    if (!geoSearchInput || !geoSearchResults) return;
+    const query = geoSearchInput.value.trim();
+    if (query.length < 2) {
+      geoSearchResults.innerHTML = '<span class="geo-search-hint">En az 2 karakter yazin.</span>';
+      return;
+    }
+    geoSearchResults.innerHTML = '<span class="geo-search-hint">Araniyor...</span>';
+    try {
+      const data = await fetchGeocodeData(query);
+      if (!data.results || data.results.length === 0) {
+        geoSearchResults.innerHTML = '<span class="geo-search-hint">Sonuc bulunamadi.</span>';
+        return;
+      }
+      renderGeoResults(data.results);
+    } catch (e) {
+      geoSearchResults.innerHTML = '<span class="geo-search-hint">Arama basarisiz. Wi-Fi baglantisini kontrol edin.</span>';
+    }
+  }
+
+  document.getElementById('btn-geo-search')?.addEventListener('click', searchLocation);
+  geoSearchInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      searchLocation();
+    }
+  });
+
 </script>
 </body></html>)=====";
 
@@ -1752,6 +1840,74 @@ static void handleApiControl() {
   server.send(200, "application/json", out);
 }
 
+static String geocodeUrlEncode(const String &in) {
+  String out;
+  out.reserve(in.length() * 3);
+  for (size_t i = 0; i < in.length(); i++) {
+    unsigned char c = (unsigned char)in[i];
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+        (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
+        c == '~') {
+      out += (char)c;
+    } else if (c == ' ') {
+      out += '+';
+    } else {
+      char buf[4];
+      snprintf(buf, sizeof(buf), "%%%02X", c);
+      out += buf;
+    }
+  }
+  return out;
+}
+
+static void handleGeocode() {
+  if (otaUpdateActive) {
+    sendJsonError(503, "Guncelleme devam ediyor");
+    return;
+  }
+
+  String q = server.hasArg("q") ? server.arg("q") : "";
+  q.trim();
+  if (q.length() < 2 || q.length() > 64) {
+    sendJsonError(400, "Gecersiz arama");
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    sendJsonError(503, "Wi-Fi bagli degil");
+    return;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(8000);
+  String url = String("https://geocoding-api.open-meteo.com/v1/search?name=") +
+               geocodeUrlEncode(q) + "&count=6&language=tr&format=json";
+  if (!http.begin(client, url)) {
+    sendJsonError(502, "Baglanti basarisiz");
+    return;
+  }
+
+  int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    http.end();
+    sendJsonError(502, "Geocoding hatasi");
+    return;
+  }
+
+  int len = http.getSize();
+  if (len > 8192 || len == 0) {
+    http.end();
+    sendJsonError(502, "Gecersiz yanit");
+    return;
+  }
+
+  String body = http.getString();
+  http.end();
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json; charset=utf-8", body);
+}
+
 } // namespace
 
 void setupWebServer() {
@@ -1761,7 +1917,8 @@ void setupWebServer() {
   server.on("/import", HTTP_POST, handleImport);
   server.on("/api/status", HTTP_GET, handleApiStatus);
   server.on("/api/control", HTTP_POST, handleApiControl);
-  
+  server.on("/api/geocode", HTTP_GET, handleGeocode);
+
   // Local web upload OTA handler
   server.on("/update", HTTP_POST, []() {
     server.sendHeader("Connection", "close");

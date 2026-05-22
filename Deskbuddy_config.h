@@ -15,4 +15,4 @@ inline constexpr const char *DESKBUDDY_SOFTAP_SSID = "Deskbuddy-Setup";
 inline constexpr const char *DESKBUDDY_MDNS_HOSTNAME = "deskbuddy";
 
 /** Firmware semver; drawTopBar + web */
-inline constexpr const char *FIRMWARE_VERSION = "v2.8.0";
+inline constexpr const char *FIRMWARE_VERSION = "v2.8.1";
